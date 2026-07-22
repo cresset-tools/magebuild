@@ -17,12 +17,17 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use gzp::ZWriter;
+use gzp::deflate::Gzip;
+use gzp::par::compress::ParCompressBuilder;
 
 use crate::graph::{BuiltinStep, Node, NodeKind};
 
-/// Shared execution context: the project root every step operates on.
+/// Shared execution context: the project root every step operates on, and the
+/// job budget (used by the packaging step to size its parallel-gzip pool).
 pub struct Ctx {
     pub root: PathBuf,
+    pub jobs: usize,
 }
 
 /// Run one node to completion. `Err` = the node failed.
@@ -43,15 +48,23 @@ fn run_builtin(step: &BuiltinStep, ctx: &Ctx) -> Result<()> {
             themes,
             locales,
             areas,
+            deployed_version,
             command,
-        } => static_deploy(&ctx.root, themes, locales, areas, command.as_deref()),
+        } => static_deploy(
+            &ctx.root,
+            themes,
+            locales,
+            areas,
+            deployed_version.as_deref(),
+            command.as_deref(),
+        ),
         BuiltinStep::AutoloadDump { no_dev, optimize } => {
             autoload_dump(&ctx.root, *no_dev, *optimize)
         }
         BuiltinStep::Package {
             output,
             exclude_from,
-        } => package(&ctx.root, output, exclude_from.as_deref()),
+        } => package(&ctx.root, output, exclude_from.as_deref(), ctx.jobs),
     }
 }
 
@@ -150,6 +163,7 @@ fn static_deploy(
     themes: &[String],
     locales: &[String],
     areas: &[String],
+    deployed_version: Option<&str>,
     command: Option<&str>,
 ) -> Result<()> {
     // An explicit override wins — honor a bespoke deploy command verbatim.
@@ -170,15 +184,18 @@ fn static_deploy(
         out: None,                      // default: <root>/pub/static
         order: sdd::Order::Probe(None), // the CLI default — byte-faithful readdir order
         no_parent: false,               // a child theme pulls in its parents (quick strategy)
-        deployed_version: None,         // no run-scoped version stamp (matches prior behavior)
-        jobs: None,                     // rayon global pool — overlaps di-compile's own pool
-        no_compress: false,             // production-mode compressed CSS
+        deployed_version: deployed_version.map(str::to_string),
+        jobs: None,         // rayon global pool — overlaps di-compile's own pool
+        no_compress: false, // production-mode compressed CSS
     };
 
     let summary = sdd::deploy_to_disk(root, &req).map_err(|e| anyhow::anyhow!("{e:#}"))?;
 
     for s in &summary.skipped {
         eprintln!("  warning (scd): skipping theme {} — {}", s.id, s.reason);
+    }
+    if let Some(v) = deployed_version {
+        eprintln!("  static-deploy: deployed_version.txt = {v}");
     }
     let files: usize = summary.stats.iter().map(|s| s.files).sum();
     let bytes: usize = summary.stats.iter().map(|s| s.bytes).sum();
@@ -216,9 +233,26 @@ fn run_command(
 // Native tar packaging
 // ---------------------------------------------------------------------------
 
-/// Package the project tree into `output`, honoring an excludes file. Gzip is
-/// selected from the output extension (`.tar.gz`/`.tgz`).
-fn package(root: &Path, output: &Path, exclude_from: Option<&Path>) -> Result<()> {
+/// zstd compression level for `.tar.zst` artifacts — zstd's fast default
+/// (denser than gzip-6 at a fraction of the time).
+const ZSTD_LEVEL: i32 = 3;
+
+/// The artifact compression, chosen from the output extension.
+enum Compress {
+    /// `.tar` — no compression.
+    None,
+    /// `.tar.gz` / `.tgz` — parallel gzip via `gzp`.
+    Gzip,
+    /// `.tar.zst` / `.tzst` — multi-threaded zstd.
+    Zstd,
+}
+
+/// Package the project tree into `output`, honoring an excludes file.
+/// Compression is chosen by extension (`.tar.gz`/`.tgz` → gzip, `.tar.zst`/
+/// `.tzst` → zstd, else uncompressed) and runs multi-threaded across `jobs`
+/// (the tar serializer runs on this thread; the compression pipelines behind
+/// it).
+fn package(root: &Path, output: &Path, exclude_from: Option<&Path>, jobs: usize) -> Result<()> {
     let patterns = match exclude_from {
         Some(p) => read_excludes(p)?,
         None => Vec::new(),
@@ -239,25 +273,48 @@ fn package(root: &Path, output: &Path, exclude_from: Option<&Path>) -> Result<()
         .and_then(|s| s.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
-    if ext == "zst" {
-        bail!(
-            "zstd (.zst) packaging needs a zstd dependency this build doesn't carry; \
-             use .tar or .tar.gz"
-        );
-    }
-    let gzip = matches!(ext.as_str(), "gz" | "tgz")
-        || output
-            .to_string_lossy()
-            .to_ascii_lowercase()
-            .ends_with(".tar.gz");
+    let compress = match ext.as_str() {
+        "gz" | "tgz" => Compress::Gzip,
+        "zst" | "tzst" => Compress::Zstd,
+        _ => Compress::None,
+    };
 
     let file = std::fs::File::create(output)
         .with_context(|| format!("creating archive {}", output.display()))?;
-    let written = if gzip {
-        let enc = flate2::write::GzEncoder::new(file, flate2::Compression::default());
-        write_tar(root, enc, &matcher, &output_abs)?
-    } else {
-        write_tar(root, file, &matcher, &output_abs)?
+    let written = match compress {
+        Compress::Gzip => {
+            // Parallel gzip: the tar bytes stream into a worker pool that
+            // compresses blocks concurrently (standard multi-member gzip;
+            // `gunzip`/`tar xzf` read it). Level 6 matches flate2's default so
+            // the artifact size is unchanged. Must `.finish()` explicitly
+            // (dropping does not finalize).
+            let par = ParCompressBuilder::<Gzip>::new()
+                .compression_level(gzp::Compression::new(6))
+                .num_threads(jobs.max(1))
+                .map_err(|e| anyhow::anyhow!("sizing gzip pool: {e}"))?
+                .from_writer(file);
+            let (n, mut par) = write_tar(root, par, &matcher, &output_abs)?;
+            par.finish()
+                .map_err(|e| anyhow::anyhow!("finalizing gzip stream: {e}"))?;
+            n
+        }
+        Compress::Zstd => {
+            // zstd with libzstd's own worker pool (feature `zstdmt`): one `.zst`
+            // stream, compressed multi-threaded internally. Must `.finish()`.
+            let mut enc = zstd::stream::write::Encoder::new(file, ZSTD_LEVEL)
+                .context("initializing zstd encoder")?;
+            if jobs > 1 {
+                enc.multithread(jobs as u32)
+                    .context("enabling zstd multi-threading")?;
+            }
+            let (n, enc) = write_tar(root, enc, &matcher, &output_abs)?;
+            enc.finish().context("finalizing zstd stream")?;
+            n
+        }
+        Compress::None => {
+            let (n, _file) = write_tar(root, file, &matcher, &output_abs)?;
+            n
+        }
     };
     eprintln!(
         "  package: {} entr{} -> {}",
@@ -268,12 +325,15 @@ fn package(root: &Path, output: &Path, exclude_from: Option<&Path>) -> Result<()
     Ok(())
 }
 
+/// Walk `root`, appending every non-excluded file to a tar stream. Returns the
+/// entry count and the finalized underlying writer (so the caller can close a
+/// compression stream that needs an explicit finish).
 fn write_tar<W: Write>(
     root: &Path,
     writer: W,
     matcher: &ExcludeMatcher,
     output_abs: &Path,
-) -> Result<usize> {
+) -> Result<(usize, W)> {
     let mut builder = tar::Builder::new(writer);
     builder.follow_symlinks(false);
     let mut count = 0usize;
@@ -312,8 +372,8 @@ fn write_tar<W: Write>(
             count += 1;
         }
     }
-    builder.finish().context("finalizing archive")?;
-    Ok(count)
+    let writer = builder.into_inner().context("finalizing archive")?;
+    Ok((count, writer))
 }
 
 fn read_excludes(path: &Path) -> Result<Vec<String>> {

@@ -28,6 +28,13 @@ clap = { version = "4", features = ["derive"] }
 rayon = "1.10"
 tar = "0.4"
 flate2 = "1"
+# Parallel gzip for the package step: the tar thread serializes while a worker
+# pool compresses blocks concurrently (standard multi-member .tar.gz output).
+# default-features off to skip the snappy backend we don't use.
+gzp = { version = "0.11", default-features = false, features = ["deflate_default"] }
+# zstd for `.tar.zst` artifacts — faster and denser than gzip, with the
+# `zstdmt` feature giving libzstd's built-in multi-threaded compression.
+zstd = { version = "0.13", features = ["zstdmt"] }
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
 anyhow = "1"

@@ -51,6 +51,11 @@ struct Cli {
     #[arg(long, global = true)]
     exclude_from: Option<PathBuf>,
 
+    /// Static-deploy content version — written to pub/static/deployed_version.txt
+    /// (asset-URL cache-busting). Omit to write no file.
+    #[arg(long, global = true)]
+    deployed_version: Option<String>,
+
     /// Run only these node ids (plus their transitive deps).
     #[arg(long, value_delimiter = ',', global = true)]
     only: Vec<String>,
@@ -106,6 +111,7 @@ fn run() -> Result<ExitCode> {
         artifact: cli.artifact.clone(),
         exclude_from: cli.exclude_from.clone(),
         jobs: cli.jobs,
+        deployed_version: cli.deployed_version.clone(),
     };
     let (mut graph, jobs) = config::resolve(&file, &opts)?;
 
@@ -144,6 +150,7 @@ fn run() -> Result<ExitCode> {
 
     let ctx = Arc::new(Ctx {
         root: std::path::absolute(&root).unwrap_or(root),
+        jobs,
     });
     let runner: Arc<Runner> = {
         let ctx = ctx.clone();

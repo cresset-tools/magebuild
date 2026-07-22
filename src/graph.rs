@@ -39,6 +39,10 @@ pub enum BuiltinStep {
         themes: Vec<String>,
         locales: Vec<String>,
         areas: Vec<String>,
+        /// `pub/static/deployed_version.txt` contents — the asset-version
+        /// signature stock SCD takes as `--content-version` (cache-busting).
+        /// `None` ⇒ don't write the file (never an invented timestamp).
+        deployed_version: Option<String>,
         /// Shell-out override for a bespoke deploy invocation; `None` ⇒ the
         /// in-process engine call.
         command: Option<String>,
@@ -79,12 +83,17 @@ impl BuiltinStep {
                 themes,
                 locales,
                 areas,
+                deployed_version,
                 ..
             } => format!(
-                "static-deploy themes={} locales={} areas={}",
+                "static-deploy themes={} locales={} areas={}{}",
                 themes.join(","),
                 locales.join(","),
-                areas.join(",")
+                areas.join(","),
+                deployed_version
+                    .as_deref()
+                    .map(|v| format!(" version={v}"))
+                    .unwrap_or_default(),
             ),
             BuiltinStep::AutoloadDump { no_dev, optimize } => format!(
                 "autoload-dump{}{}",

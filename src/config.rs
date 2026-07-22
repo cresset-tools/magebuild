@@ -21,6 +21,9 @@ pub struct BuildOptions {
     pub exclude_from: Option<PathBuf>,
     /// `--jobs`.
     pub jobs: Option<usize>,
+    /// `--deployed-version` — the static-deploy content-version signature
+    /// written to `pub/static/deployed_version.txt`.
+    pub deployed_version: Option<String>,
 }
 
 /// The five-node default Magento build graph:
@@ -55,6 +58,7 @@ pub fn default_graph() -> Graph {
                 themes: vec!["*".into()],
                 locales: vec!["en_US".into()],
                 areas: vec!["frontend".into(), "adminhtml".into()],
+                deployed_version: None,
                 command: None,
             },
         ),
@@ -105,6 +109,7 @@ pub struct NodeSpec {
     pub themes: Option<Vec<String>>,
     pub locales: Option<Vec<String>>,
     pub areas: Option<Vec<String>>,
+    pub deployed_version: Option<String>,
     pub exclude_from: Option<PathBuf>,
     pub output: Option<PathBuf>,
 }
@@ -148,6 +153,16 @@ pub fn resolve(file: &FileConfig, opts: &BuildOptions) -> Result<(Graph, usize)>
         if let Some(ex) = &opts.exclude_from {
             *exclude_from = Some(ex.clone());
         }
+    }
+
+    // --deployed-version overrides the static-deploy node's content version.
+    if let Some(dv) = &opts.deployed_version
+        && let Some(node) = graph.get_mut("static-deploy")
+        && let NodeKind::Native(BuiltinStep::StaticDeploy {
+            deployed_version, ..
+        }) = &mut node.kind
+    {
+        *deployed_version = Some(dv.clone());
     }
 
     graph.validate().context("invalid build graph")?;
@@ -229,6 +244,7 @@ fn override_step(step: &mut BuiltinStep, spec: &NodeSpec) {
             themes,
             locales,
             areas,
+            deployed_version,
             ..
         } => {
             if let Some(v) = &spec.themes {
@@ -239,6 +255,9 @@ fn override_step(step: &mut BuiltinStep, spec: &NodeSpec) {
             }
             if let Some(v) = &spec.areas {
                 *areas = v.clone();
+            }
+            if let Some(v) = &spec.deployed_version {
+                *deployed_version = Some(v.clone());
             }
         }
         BuiltinStep::AutoloadDump { no_dev, optimize } => {
