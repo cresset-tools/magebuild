@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.2.0...magebuild-v0.2.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* **deps:** re-pin magequery to include the LESS [@import](https://github.com/import) url() passthrough ([4abbc99](https://github.com/cresset-tools/magebuild/commit/4abbc99cce503794d42eaeaad017cb0d01ee8b12))
+
 ## [0.2.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.1.0...magebuild-v0.2.0) (2026-07-22)
 
 
