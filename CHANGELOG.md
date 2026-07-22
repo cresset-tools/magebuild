@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.2.2...magebuild-v0.3.0) (2026-07-22)
+
+
+### Features
+
+* hard-link composer packages from a warm store in CI ([eec4a86](https://github.com/cresset-tools/magebuild/commit/eec4a86bbb4cb39a12a7b15c083210859126f8cd))
+
+
+### Bug Fixes
+
+* **deps:** re-pin magequery to 0.13.0 (latest magecommand engines) ([9c4eb9e](https://github.com/cresset-tools/magebuild/commit/9c4eb9e2643e43c137a7fe59fec3e1232530100c))
+
 ## [0.2.2](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.2.1...magebuild-v0.2.2) (2026-07-22)
 
 
