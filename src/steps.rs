@@ -99,6 +99,17 @@ fn composer_install(root: &Path, no_dev: bool, cache_root: Option<&Path>) -> Res
     std::fs::create_dir_all(&cache)
         .with_context(|| format!("creating composer dist cache {}", cache.display()))?;
 
+    // In CI the dist cache is warmed across runs (e.g. setup-bougie keys it on
+    // composer.lock), so hard-link packages out of a decompress-once store
+    // instead of re-extracting all of them every run. Locally we extract
+    // directly — there's no persistent warm store to link from unless CI-style
+    // caching is in play, and hard-linking cold is slower than a plain extract.
+    let link_mode = if std::env::var_os("CI").is_some() {
+        composer_install::LinkMode::Hardlink
+    } else {
+        composer_install::LinkMode::Extract
+    };
+
     let fetcher = composer_install::ReqwestFetcher::new()
         .map_err(|e| anyhow::anyhow!("building HTTP fetcher: {e:#}"))?;
     let env = composer_install::InstallEnv {
@@ -109,7 +120,7 @@ fn composer_install(root: &Path, no_dev: bool, cache_root: Option<&Path>) -> Res
     let summary = composer_install::install_from_lock_with_patches(
         &env,
         root,
-        composer_install::InstallOptions { no_dev },
+        composer_install::InstallOptions { no_dev, link_mode },
         None,
         None,
     )

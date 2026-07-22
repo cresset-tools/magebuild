@@ -19,7 +19,7 @@ magecommand = { git = "https://github.com/cresset-tools/magequery", rev = "ee95a
 
 # Composer client — crates.io. composer-install (install-from-lock),
 # composer-autoload (optimized dump-autoload), composer-manifest (lockfile model).
-composer-install = "0.1"
+composer-install = "0.2"
 composer-autoload = "0.1"
 composer-manifest = "0.1"
 
