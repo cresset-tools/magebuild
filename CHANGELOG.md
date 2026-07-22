@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.2.1...magebuild-v0.2.2) (2026-07-22)
+
+
+### Bug Fixes
+
+* quieter vendor check + persistent, shareable composer cache ([352bc54](https://github.com/cresset-tools/magebuild/commit/352bc5486b72e5c7b149e7331662b21f28e34d5d))
+
 ## [0.2.1](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.2.0...magebuild-v0.2.1) (2026-07-22)
 
 
