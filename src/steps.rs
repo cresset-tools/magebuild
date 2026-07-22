@@ -40,9 +40,11 @@ pub fn execute(node: &Node, ctx: &Ctx) -> Result<()> {
 
 fn run_builtin(step: &BuiltinStep, ctx: &Ctx) -> Result<()> {
     match step {
-        BuiltinStep::ComposerInstall { no_dev, cache_root } => {
-            composer_install(&ctx.root, *no_dev, cache_root.as_deref())
-        }
+        BuiltinStep::ComposerInstall {
+            no_dev,
+            cache_root,
+            hardlink,
+        } => composer_install(&ctx.root, *no_dev, cache_root.as_deref(), *hardlink),
         BuiltinStep::DiCompile { fused } => di_compile(&ctx.root, *fused),
         BuiltinStep::StaticDeploy {
             themes,
@@ -92,19 +94,25 @@ fn composer_cache_dir() -> PathBuf {
 }
 
 /// `composer install` from `composer.lock`, in-process.
-fn composer_install(root: &Path, no_dev: bool, cache_root: Option<&Path>) -> Result<()> {
+fn composer_install(
+    root: &Path,
+    no_dev: bool,
+    cache_root: Option<&Path>,
+    hardlink: bool,
+) -> Result<()> {
     let cache = cache_root
         .map(Path::to_path_buf)
         .unwrap_or_else(composer_cache_dir);
     std::fs::create_dir_all(&cache)
         .with_context(|| format!("creating composer dist cache {}", cache.display()))?;
 
-    // In CI the dist cache is warmed across runs (e.g. setup-bougie keys it on
-    // composer.lock), so hard-link packages out of a decompress-once store
-    // instead of re-extracting all of them every run. Locally we extract
-    // directly — there's no persistent warm store to link from unless CI-style
-    // caching is in play, and hard-linking cold is slower than a plain extract.
-    let link_mode = if std::env::var_os("CI").is_some() {
+    // Hard-link packages out of a decompress-once store instead of extracting
+    // each install. OFF by default: it only wins with a PERSISTENT, uncompressed
+    // store (self-hosted CI, a docker layer, repeated local builds). With an
+    // ephemeral `actions/cache` the compressed store re-decompresses on restore,
+    // so there is no gain over a plain extract. Opt in via magebuild.toml
+    // (`[nodes.composer-install] hardlink = true`) or the MAGEBUILD_HARDLINK env.
+    let link_mode = if hardlink || std::env::var_os("MAGEBUILD_HARDLINK").is_some() {
         composer_install::LinkMode::Hardlink
     } else {
         composer_install::LinkMode::Extract

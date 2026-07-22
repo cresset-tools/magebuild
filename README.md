@@ -69,11 +69,22 @@ fused = true                       # fused interceptors
 [nodes.static-deploy]
 locales = ["en_US", "nl_NL"]
 
+[nodes.composer-install]
+hardlink = true                    # see below — off by default
+
 # add a custom step to the graph
 [nodes.my-assets]
 after = ["composer-install"]
 run = "npm run build"
 ```
+
+`hardlink` (or the `MAGEBUILD_HARDLINK` env var) makes composer-install
+hard-link packages out of a decompress-once store instead of extracting on every
+run. It's **off by default** because it only pays off with a *persistent,
+uncompressed* store — self-hosted CI with a cache disk, a Docker layer, or
+repeated local builds. On ephemeral CI that restores the store from a compressed
+`actions/cache`, the restore re-decompresses everything, so a plain extract is
+just as fast.
 
 ## Deployer integration
 

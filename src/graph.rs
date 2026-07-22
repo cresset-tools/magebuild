@@ -26,8 +26,15 @@ pub enum BuiltinStep {
     /// `composer install` from `composer.lock` (in-process via `composer-install`).
     ComposerInstall {
         no_dev: bool,
-        /// Dist-archive cache dir; `None` ⇒ `<root>/var/cache/composer-dist`.
+        /// Dist-archive cache dir; `None` ⇒ the persistent user cache
+        /// (`MAGEBUILD_CACHE_DIR` or `~/.cache/magebuild/composer-dist`).
         cache_root: Option<PathBuf>,
+        /// Hard-link packages out of a decompress-once store instead of
+        /// extracting each install. Off by default — only wins with a
+        /// persistent, uncompressed store (self-hosted CI, a docker layer,
+        /// repeated local builds), not `actions/cache` (which re-decompresses
+        /// on restore). `MAGEBUILD_HARDLINK` in the env forces it on too.
+        hardlink: bool,
     },
     /// `setup:di:compile` (in-process via `magecommand-engine`).
     DiCompile { fused: bool },
@@ -73,8 +80,14 @@ impl BuiltinStep {
 
     fn label(&self) -> String {
         match self {
-            BuiltinStep::ComposerInstall { no_dev, .. } => {
-                format!("composer-install{}", if *no_dev { " --no-dev" } else { "" })
+            BuiltinStep::ComposerInstall {
+                no_dev, hardlink, ..
+            } => {
+                format!(
+                    "composer-install{}{}",
+                    if *no_dev { " --no-dev" } else { "" },
+                    if *hardlink { " hardlink" } else { "" }
+                )
             }
             BuiltinStep::DiCompile { fused } => {
                 format!("di-compile{}", if *fused { " --fused" } else { "" })

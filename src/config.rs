@@ -36,6 +36,7 @@ pub fn default_graph() -> Graph {
             BuiltinStep::ComposerInstall {
                 no_dev: true,
                 cache_root: None,
+                hardlink: false,
             },
         ),
         Node::native(
@@ -105,6 +106,7 @@ pub struct NodeSpec {
     pub no_dev: Option<bool>,
     pub optimize: Option<bool>,
     pub fused: Option<bool>,
+    pub hardlink: Option<bool>,
     pub cache_root: Option<PathBuf>,
     pub themes: Option<Vec<String>>,
     pub locales: Option<Vec<String>>,
@@ -227,12 +229,19 @@ fn apply_spec(graph: &mut Graph, id: &str, spec: &NodeSpec) -> Result<()> {
 
 fn override_step(step: &mut BuiltinStep, spec: &NodeSpec) {
     match step {
-        BuiltinStep::ComposerInstall { no_dev, cache_root } => {
+        BuiltinStep::ComposerInstall {
+            no_dev,
+            cache_root,
+            hardlink,
+        } => {
             if let Some(v) = spec.no_dev {
                 *no_dev = v;
             }
             if let Some(v) = &spec.cache_root {
                 *cache_root = Some(v.clone());
+            }
+            if let Some(v) = spec.hardlink {
+                *hardlink = v;
             }
         }
         BuiltinStep::DiCompile { fused } => {
