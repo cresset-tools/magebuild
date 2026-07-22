@@ -1,6 +1,6 @@
 [package]
 name = "magebuild"
-version = "0.2.2" # x-release-please-version
+version = "0.3.0" # x-release-please-version
 edition = "2024"
 rust-version = "1.95"
 license = "EUPL-1.2"
