@@ -322,18 +322,21 @@ mod tests {
 
     #[test]
     fn parallelism_actually_overlaps() {
-        // Two independent 60ms nodes with jobs=2 finish well under the 120ms
-        // serial wall — proves overlap.
+        // Two independent sleeping nodes overlap at jobs=2, so the wall is
+        // meaningfully shorter than the same work forced serial (jobs=1).
+        // Comparing against a serial baseline measured on THIS machine keeps the
+        // test robust on slow / contended CI runners — a fixed millisecond bound
+        // flakes there even when the overlap is real.
         let graph = Graph::new(vec![io("x", &[]), io("y", &[])]);
         let runner: Arc<Runner> = Arc::new(|_node| {
             std::thread::sleep(Duration::from_millis(60));
             Ok(())
         });
-        let report = run(&graph, 2, runner, Arc::new(SilentObserver));
+        let serial = run(&graph, 1, runner.clone(), Arc::new(SilentObserver)).wall;
+        let parallel = run(&graph, 2, runner, Arc::new(SilentObserver)).wall;
         assert!(
-            report.wall < Duration::from_millis(115),
-            "no overlap: {:?}",
-            report.wall
+            parallel * 4 < serial * 3,
+            "no overlap: parallel {parallel:?} not < 0.75 * serial {serial:?}"
         );
     }
 
