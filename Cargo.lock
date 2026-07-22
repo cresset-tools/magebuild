@@ -1591,7 +1591,7 @@ dependencies = [
 [[package]]
 name = "magecommand"
 version = "0.12.4"
-source = "git+https://github.com/cresset-tools/magequery?rev=3b3f966ea85d4b3267a8c4dee4f87666b874dbbb#3b3f966ea85d4b3267a8c4dee4f87666b874dbbb"
+source = "git+https://github.com/cresset-tools/magequery?rev=5f31bf3dd5d69847128244b115896961fa3df7ad#5f31bf3dd5d69847128244b115896961fa3df7ad"
 dependencies = [
  "anyhow",
  "base64",
@@ -1618,7 +1618,7 @@ dependencies = [
 [[package]]
 name = "magecommand-engine"
 version = "0.12.4"
-source = "git+https://github.com/cresset-tools/magequery?rev=3b3f966ea85d4b3267a8c4dee4f87666b874dbbb#3b3f966ea85d4b3267a8c4dee4f87666b874dbbb"
+source = "git+https://github.com/cresset-tools/magequery?rev=5f31bf3dd5d69847128244b115896961fa3df7ad#5f31bf3dd5d69847128244b115896961fa3df7ad"
 dependencies = [
  "blake3",
  "magecommand-php",
@@ -1633,7 +1633,7 @@ dependencies = [
 [[package]]
 name = "magecommand-less"
 version = "0.12.4"
-source = "git+https://github.com/cresset-tools/magequery?rev=3b3f966ea85d4b3267a8c4dee4f87666b874dbbb#3b3f966ea85d4b3267a8c4dee4f87666b874dbbb"
+source = "git+https://github.com/cresset-tools/magequery?rev=5f31bf3dd5d69847128244b115896961fa3df7ad#5f31bf3dd5d69847128244b115896961fa3df7ad"
 dependencies = [
  "cssparser 0.37.0",
  "fancy-regex",
@@ -1645,7 +1645,7 @@ dependencies = [
 [[package]]
 name = "magecommand-php"
 version = "0.12.4"
-source = "git+https://github.com/cresset-tools/magequery?rev=3b3f966ea85d4b3267a8c4dee4f87666b874dbbb#3b3f966ea85d4b3267a8c4dee4f87666b874dbbb"
+source = "git+https://github.com/cresset-tools/magequery?rev=5f31bf3dd5d69847128244b115896961fa3df7ad#5f31bf3dd5d69847128244b115896961fa3df7ad"
 dependencies = [
  "memchr",
 ]
@@ -1653,7 +1653,7 @@ dependencies = [
 [[package]]
 name = "magequery-core"
 version = "0.12.4"
-source = "git+https://github.com/cresset-tools/magequery?rev=3b3f966ea85d4b3267a8c4dee4f87666b874dbbb#3b3f966ea85d4b3267a8c4dee4f87666b874dbbb"
+source = "git+https://github.com/cresset-tools/magequery?rev=5f31bf3dd5d69847128244b115896961fa3df7ad#5f31bf3dd5d69847128244b115896961fa3df7ad"
 dependencies = [
  "aes",
  "base64",
