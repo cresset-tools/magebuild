@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.3.0...magebuild-v0.3.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* make composer hard-linking opt-in (default Extract) ([cbbee75](https://github.com/cresset-tools/magebuild/commit/cbbee75777cec1a96c09215ad5dcfc82e4bcec99))
+
 ## [0.3.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.2.2...magebuild-v0.3.0) (2026-07-22)
 
 
