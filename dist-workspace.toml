@@ -1,0 +1,110 @@
+# dist configuration. Produces per-target binary archives plus shell/powershell
+# installers. release-please owns the whole release: it publishes the
+# `magebuild-v<version>` GitHub Release (creating the tag), and the
+# `release: published` event triggers dist to build the binaries and upload
+# them onto that release.
+#
+# Edit this file when adding targets / installers, then regenerate the workflow
+# with:
+#     dist generate
+# which rewrites .github/workflows/release.yml. NOTE: `dist generate` emits an
+# `on: push: tags` trigger; we hand-edit it to `on: release: published`
+# (release-please creates tags via the API, which doesn't reliably fire
+# `push`). Re-apply that trigger edit after any regenerate. `allow-dirty =
+# ["ci"]` tells dist we own that file so its `generate --check` won't abort.
+
+[workspace]
+members = ["cargo:."]
+
+[dist]
+# Pin the dist version CI runs. Bumps come through PRs so the generated
+# release.yml stays in lockstep.
+cargo-dist-version = "0.32.0"
+
+# CI provider.
+ci = "github"
+
+# uv-style installers: `curl ... | sh` on Unix, `irm ... | iex` on Windows.
+installers = ["shell", "powershell"]
+
+# Archive formats per platform.
+windows-archive = ".zip"
+unix-archive = ".tar.gz"
+
+# Target triples we ship prebuilt binaries for. Linux gets both gnu and musl
+# (older distros and Alpine both work) plus arm64 (devcontainers, Graviton CI);
+# macOS gets both Apple Silicon and Intel; Windows is x64. Anything that
+# auto-downloads magebuild by triple name (a Deployer recipe, CI action) must
+# stay in sync with this list.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-unknown-linux-musl",
+    "aarch64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+
+# Keep the tarballs to just the binary the installer drops on PATH.
+auto-includes = false
+
+# release-please publishes the GitHub Release (with the changelog body) and
+# creates the tag; dist only attaches the built binaries.
+create-release = false
+
+# We hand-edit release.yml's trigger to `on: release: published`, so tell dist
+# we own the CI file and skip its `generate --check`.
+allow-dirty = ["ci"]
+
+# Don't run dist on PRs. CI already covers building.
+pr-run-mode = "skip"
+
+# release-please tags as `magebuild-v<version>` rather than the bare
+# `v<version>` dist defaults to.
+tag-namespace = "magebuild"
+
+# Where the shell installer drops the binary. Matches uv's layout so installs
+# land on PATH without extra config.
+install-path = ["$XDG_BIN_HOME/", "$XDG_DATA_HOME/../bin", "~/.local/bin"]
+
+# Mirror first, GitHub fallback. The "simple" host MUST be listed in `hosting`
+# for it to reach the generated installer. Order here is the download
+# precedence the shell/powershell installers use (try the mirror, fall back to
+# the GitHub release if it's offline / hasn't ingested the new tag yet). Shared
+# cresset origin mirror (origin.bougie.tools; see publish-mirror.yml +
+# cresset-tools/infra).
+hosting = ["simple", "github"]
+simple-download-url = "https://releases.bougie.tools/github/magebuild/releases/download/{tag}"
+
+# Post-announce jobs: sign-release attaches cosign keyless `.sig` Sigstore
+# bundles to the release, publish-mirror fans the dist artifacts (+ bundles)
+# out to the origin server, composer-branch publishes the Packagist tag.
+# Ordering (sign -> mirror/composer) lives in release.yml's hand-edited
+# `needs`, so the composer tag can only exist once every binary is attached
+# AND signed. (release.yml is hand-edited; keep these entries and the
+# explicit `custom-*` jobs there in sync.)
+post-announce-jobs = ["./sign-release", "./publish-mirror", "./composer-branch"]
+
+# sign-release uploads .sig assets (contents) and signs keyless (id-token);
+# publish-mirror only reads the uploaded artifacts; composer-branch pushes
+# the composer branch + v* tag.
+github-custom-job-permissions = { "sign-release" = { contents = "write", id-token = "write" }, "publish-mirror" = { contents = "read" }, "composer-branch" = { contents = "write" } }
+
+# What the installers print after a successful install.
+install-success-msg = """
+magebuild is installed! Run magebuild --help to get started, or point it at a
+Magento root with magebuild --root path/to/store --artifact release.tar.zst.
+"""
+
+# The musl target builds libzstd (zstd-sys) with the musl-targeting C compiler.
+[dist.dependencies.apt]
+musl-tools = '*'
+
+# The single binary every release ships.
+[dist.binaries]
+"*" = ["magebuild"]
+
+# arm64 Linux builds natively on GitHub's free arm runners (dist doesn't
+# cross-compile gnu targets by itself).
+[dist.github-custom-runners]
+aarch64-unknown-linux-gnu = "ubuntu-22.04-arm"
