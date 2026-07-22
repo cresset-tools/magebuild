@@ -1,0 +1,40 @@
+[package]
+name = "magebuild"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "EUPL-1.2"
+authors = ["Jelle Besseling <jelle@pingiun.com>"]
+repository = "https://github.com/cresset-tools/magebuild"
+description = "Build a Magento release as fast as possible — a parallel, DAG-ordered orchestrator that runs composer install, di-compile, static-content-deploy, autoload dump, and packaging in one process, replacing the build half of a Deployer recipe."
+
+[dependencies]
+# Magento engines — git-pinned to cresset-tools/magequery (public repo), linked
+# in-process. di-compile: magecommand-engine (scan -> compute_outputs ->
+# write_generated); static-content-deploy: magecommand's static_deploy; Magento
+# discovery/index: magequery-core.
+magequery-core = { git = "https://github.com/cresset-tools/magequery", rev = "3b3f966ea85d4b3267a8c4dee4f87666b874dbbb" }
+magecommand-engine = { git = "https://github.com/cresset-tools/magequery", rev = "3b3f966ea85d4b3267a8c4dee4f87666b874dbbb" }
+magecommand = { git = "https://github.com/cresset-tools/magequery", rev = "3b3f966ea85d4b3267a8c4dee4f87666b874dbbb" }
+
+# Composer client — crates.io. composer-install (install-from-lock),
+# composer-autoload (optimized dump-autoload), composer-manifest (lockfile model).
+composer-install = "0.1"
+composer-autoload = "0.1"
+composer-manifest = "0.1"
+
+# CLI + orchestration.
+clap = { version = "4", features = ["derive"] }
+rayon = "1.10"
+tar = "0.4"
+flate2 = "1"
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }
+anyhow = "1"
+tracing = "0.1"
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
+opt-level = 3
+strip = "symbols"
