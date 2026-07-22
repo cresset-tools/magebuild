@@ -6,8 +6,11 @@ use std::path::Path;
 
 use anyhow::{Result, bail};
 
-/// Returns warnings (never fatal beyond the root check).
-pub fn check(root: &Path) -> Result<Vec<String>> {
+/// Returns warnings (never fatal beyond the root check). `installs_vendor` is
+/// true when the resolved graph has an active composer-install node — an absent
+/// `vendor/` is then the normal starting state (it's about to be created), so
+/// it isn't worth a warning.
+pub fn check(root: &Path, installs_vendor: bool) -> Result<Vec<String>> {
     if magequery_core::Magento::find_root(root).is_none() {
         bail!(
             "no Magento root found at or above {} (need app/etc/config.php)",
@@ -26,10 +29,11 @@ pub fn check(root: &Path) -> Result<Vec<String>> {
                 .to_string(),
         );
     }
-    if !root.join("vendor").is_dir() {
+    // Only warn about a missing vendor/ when nothing in this run installs it.
+    if !installs_vendor && !root.join("vendor").is_dir() {
         warnings.push(
-            "vendor/ is absent — native di-compile/static-deploy need it; \
-             composer-install must run first"
+            "vendor/ is absent and composer-install is not in this run — native \
+             di-compile/static-deploy need it; install dependencies first"
                 .to_string(),
         );
     }

@@ -68,11 +68,34 @@ fn run_builtin(step: &BuiltinStep, ctx: &Ctx) -> Result<()> {
     }
 }
 
+/// Where composer dist archives are cached when a node sets no explicit
+/// `cache_root`. A PERSISTENT, user-global location so repeated builds (and CI
+/// with a warmed cache) reuse downloads instead of re-fetching every package —
+/// a project-local `var/cache` is excluded from the artifact and cold every run.
+/// `MAGEBUILD_CACHE_DIR` overrides it exactly: point it at a cache your CI
+/// already warms (e.g. share the one setup-bougie keys on composer.lock) to
+/// reuse those downloads with no cold first run.
+fn composer_cache_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("MAGEBUILD_CACHE_DIR").filter(|s| !s.is_empty()) {
+        return PathBuf::from(dir);
+    }
+    let base = std::env::var_os("XDG_CACHE_HOME")
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .filter(|s| !s.is_empty())
+                .map(|h| PathBuf::from(h).join(".cache"))
+        })
+        .unwrap_or_else(|| PathBuf::from(".magebuild-cache"));
+    base.join("magebuild").join("composer-dist")
+}
+
 /// `composer install` from `composer.lock`, in-process.
 fn composer_install(root: &Path, no_dev: bool, cache_root: Option<&Path>) -> Result<()> {
     let cache = cache_root
         .map(Path::to_path_buf)
-        .unwrap_or_else(|| root.join("var/cache/composer-dist"));
+        .unwrap_or_else(composer_cache_dir);
     std::fs::create_dir_all(&cache)
         .with_context(|| format!("creating composer dist cache {}", cache.display()))?;
 

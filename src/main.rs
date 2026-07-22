@@ -143,7 +143,16 @@ fn run() -> Result<ExitCode> {
     }
 
     // Real build: pre-flight (fail fast on a bad root; warn on contract gaps).
-    let warnings = preflight::check(&root)?;
+    // An absent vendor/ is only worth flagging when nothing in this run installs
+    // it — a full build's composer-install creates it.
+    let installs_vendor = graph.nodes().iter().any(|n| {
+        !n.is_skipped()
+            && matches!(
+                n.kind,
+                crate::graph::NodeKind::Native(crate::graph::BuiltinStep::ComposerInstall { .. })
+            )
+    });
+    let warnings = preflight::check(&root, installs_vendor)?;
     for w in &warnings {
         eprintln!("warning: {w}");
     }
