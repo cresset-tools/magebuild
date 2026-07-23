@@ -50,6 +50,7 @@ fn run_builtin(step: &BuiltinStep, ctx: &Ctx) -> Result<()> {
             themes,
             locales,
             areas,
+            no_parent,
             deployed_version,
             command,
         } => static_deploy(
@@ -57,6 +58,7 @@ fn run_builtin(step: &BuiltinStep, ctx: &Ctx) -> Result<()> {
             themes,
             locales,
             areas,
+            *no_parent,
             deployed_version.as_deref(),
             command.as_deref(),
         ),
@@ -205,6 +207,7 @@ fn static_deploy(
     themes: &[String],
     locales: &[String],
     areas: &[String],
+    no_parent: bool,
     deployed_version: Option<&str>,
     command: Option<&str>,
 ) -> Result<()> {
@@ -225,7 +228,7 @@ fn static_deploy(
         areas: areas.to_vec(),
         out: None,                      // default: <root>/pub/static
         order: sdd::Order::Probe(None), // the CLI default — byte-faithful readdir order
-        no_parent: false,               // a child theme pulls in its parents (quick strategy)
+        no_parent,                      // default false: a child theme pulls in its parents
         deployed_version: deployed_version.map(str::to_string),
         jobs: None,         // rayon global pool — overlaps di-compile's own pool
         no_compress: false, // production-mode compressed CSS

@@ -59,6 +59,7 @@ pub fn default_graph() -> Graph {
                 themes: vec!["*".into()],
                 locales: vec!["en_US".into()],
                 areas: vec!["frontend".into(), "adminhtml".into()],
+                no_parent: false,
                 deployed_version: None,
                 command: None,
             },
@@ -111,6 +112,7 @@ pub struct NodeSpec {
     pub themes: Option<Vec<String>>,
     pub locales: Option<Vec<String>>,
     pub areas: Option<Vec<String>>,
+    pub no_parent: Option<bool>,
     pub deployed_version: Option<String>,
     pub exclude_from: Option<PathBuf>,
     pub output: Option<PathBuf>,
@@ -253,6 +255,7 @@ fn override_step(step: &mut BuiltinStep, spec: &NodeSpec) {
             themes,
             locales,
             areas,
+            no_parent,
             deployed_version,
             ..
         } => {
@@ -264,6 +267,9 @@ fn override_step(step: &mut BuiltinStep, spec: &NodeSpec) {
             }
             if let Some(v) = &spec.areas {
                 *areas = v.clone();
+            }
+            if let Some(v) = spec.no_parent {
+                *no_parent = v;
             }
             if let Some(v) = &spec.deployed_version {
                 *deployed_version = Some(v.clone());

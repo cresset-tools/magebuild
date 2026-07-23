@@ -46,6 +46,14 @@ pub enum BuiltinStep {
         themes: Vec<String>,
         locales: Vec<String>,
         areas: Vec<String>,
+        /// Do NOT auto-deploy a theme's parent(s) (magecommand `--no-parent`).
+        /// Default `false`: a child theme pulls its ancestors into the deploy
+        /// (Magento's quick strategy). Set `true` when the deployed child tree
+        /// is self-contained (the parent→child fallback is resolved from source
+        /// at deploy time) and the parent theme is never served — e.g. a Hyvä
+        /// storefront whose only Luma use is the fallback checkout: Magento/luma
+        /// ships, but its parent Magento/blank need not.
+        no_parent: bool,
         /// `pub/static/deployed_version.txt` contents — the asset-version
         /// signature stock SCD takes as `--content-version` (cache-busting).
         /// `None` ⇒ don't write the file (never an invented timestamp).
@@ -96,13 +104,15 @@ impl BuiltinStep {
                 themes,
                 locales,
                 areas,
+                no_parent,
                 deployed_version,
                 ..
             } => format!(
-                "static-deploy themes={} locales={} areas={}{}",
+                "static-deploy themes={} locales={} areas={}{}{}",
                 themes.join(","),
                 locales.join(","),
                 areas.join(","),
+                if *no_parent { " --no-parent" } else { "" },
                 deployed_version
                     .as_deref()
                     .map(|v| format!(" version={v}"))
