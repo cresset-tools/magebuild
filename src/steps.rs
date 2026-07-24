@@ -15,6 +15,7 @@
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 
 use anyhow::{Context, Result, bail};
 use gzp::ZWriter;
@@ -338,7 +339,7 @@ fn package(root: &Path, output: &Path, exclude_from: Option<&Path>, jobs: usize)
                 .num_threads(jobs.max(1))
                 .map_err(|e| anyhow::anyhow!("sizing gzip pool: {e}"))?
                 .from_writer(file);
-            let (n, mut par) = write_tar(root, par, &matcher, &output_abs)?;
+            let (n, mut par) = write_tar(root, par, &matcher, &output_abs, jobs)?;
             par.finish()
                 .map_err(|e| anyhow::anyhow!("finalizing gzip stream: {e}"))?;
             n
@@ -352,12 +353,12 @@ fn package(root: &Path, output: &Path, exclude_from: Option<&Path>, jobs: usize)
                 enc.multithread(jobs as u32)
                     .context("enabling zstd multi-threading")?;
             }
-            let (n, enc) = write_tar(root, enc, &matcher, &output_abs)?;
+            let (n, enc) = write_tar(root, enc, &matcher, &output_abs, jobs)?;
             enc.finish().context("finalizing zstd stream")?;
             n
         }
         Compress::None => {
-            let (n, _file) = write_tar(root, file, &matcher, &output_abs)?;
+            let (n, _file) = write_tar(root, file, &matcher, &output_abs, jobs)?;
             n
         }
     };
@@ -370,20 +371,30 @@ fn package(root: &Path, output: &Path, exclude_from: Option<&Path>, jobs: usize)
     Ok(())
 }
 
-/// Walk `root`, appending every non-excluded file to a tar stream. Returns the
-/// entry count and the finalized underlying writer (so the caller can close a
-/// compression stream that needs an explicit finish).
-fn write_tar<W: Write>(
-    root: &Path,
-    writer: W,
-    matcher: &ExcludeMatcher,
-    output_abs: &Path,
-) -> Result<(usize, W)> {
-    let mut builder = tar::Builder::new(writer);
-    builder.follow_symlinks(false);
-    let mut count = 0usize;
+/// One walked tree entry destined for the archive (directories are never
+/// emitted — tar records files, and empty dirs are rare in a Magento tree).
+struct Entry {
+    path: PathBuf,
+    rel: PathBuf,
+    kind: EntryKind,
+}
+
+/// A regular file (carry its `symlink_metadata` so the writer can stamp the tar
+/// header without a second `stat`) versus anything else — a symlink or special
+/// node the writer appends via the `stat`-and-readlink `append_path_with_name`.
+enum EntryKind {
+    File(std::fs::Metadata),
+    Other,
+}
+
+/// The deterministic walk, factored out of the writer: the exact stack + per-dir
+/// sort order the serial version used, so the archive's entry order (and thus
+/// its bytes) is unchanged. Cheap per entry (`read_dir` + `symlink_metadata`);
+/// the expensive part — reading 490k file *bodies* — is what the writer
+/// parallelizes.
+fn collect_entries(root: &Path, matcher: &ExcludeMatcher, output_abs: &Path) -> Result<Vec<Entry>> {
+    let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
-    // Deterministic walk: sort each directory's entries.
     while let Some(dir) = stack.pop() {
         let mut entries: Vec<PathBuf> = std::fs::read_dir(&dir)
             .with_context(|| format!("reading {}", dir.display()))?
@@ -392,7 +403,7 @@ fn write_tar<W: Write>(
         entries.sort();
         for path in entries {
             let rel = match path.strip_prefix(root) {
-                Ok(r) => r,
+                Ok(r) => r.to_path_buf(),
                 Err(_) => continue,
             };
             let rel_str = rel.to_string_lossy().replace('\\', "/");
@@ -408,15 +419,137 @@ fn write_tar<W: Write>(
                 continue;
             }
             if is_dir {
-                stack.push(path.clone());
-                continue; // tar records files; empty dirs are rare in a Magento tree
+                stack.push(path);
+                continue;
             }
-            builder
-                .append_path_with_name(&path, rel)
-                .with_context(|| format!("archiving {}", path.display()))?;
-            count += 1;
+            let kind = if meta.file_type().is_file() {
+                EntryKind::File(meta)
+            } else {
+                EntryKind::Other
+            };
+            out.push(Entry { path, rel, kind });
         }
     }
+    Ok(out)
+}
+
+/// A tar entry ready for the (serial) writer: a regular file whose body is being
+/// read on a worker (awaited via `data`), or a symlink/special node the writer
+/// reads itself.
+enum Pending {
+    File {
+        meta: std::fs::Metadata,
+        rel: PathBuf,
+        data: mpsc::Receiver<std::io::Result<Vec<u8>>>,
+    },
+    Other {
+        path: PathBuf,
+        rel: PathBuf,
+    },
+}
+
+/// Walk `root` and append every non-excluded file to a tar stream. Returns the
+/// entry count and the finalized underlying writer (so the caller can close a
+/// compression stream that needs an explicit finish).
+///
+/// The serial version read all ~490k file bodies on one thread — a `open`/
+/// `read`/`close` syscall storm that dominated the package step (~70 MB/s, far
+/// below the SSD, and far below what zstd could consume). tar's byte stream is
+/// inherently sequential, so the *writer* stays single-threaded; what
+/// parallelizes is the reading: a producer walks the (deterministically ordered)
+/// entries and dispatches each file's body read to the rayon pool, keeping at
+/// most `window` reads in flight (a bounded look-ahead — `sync_channel(window)`
+/// back-pressures the producer, so memory stays ~`window` files, not the whole
+/// 8 GB tree). The writer consumes in walk order and appends, so the archive is
+/// byte-identical to the serial one.
+fn write_tar<W: Write>(
+    root: &Path,
+    writer: W,
+    matcher: &ExcludeMatcher,
+    output_abs: &Path,
+    jobs: usize,
+) -> Result<(usize, W)> {
+    let entries = collect_entries(root, matcher, output_abs)?;
+
+    let mut builder = tar::Builder::new(writer);
+    builder.follow_symlinks(false);
+    let mut count = 0usize;
+
+    // Look-ahead depth: enough to keep every worker fed without buffering the
+    // world. `jobs * 4` outstanding reads (min 8) means ~that many file bodies
+    // resident at once.
+    let window = (jobs.max(1) * 4).max(8);
+    let (job_tx, job_rx) = mpsc::sync_channel::<Pending>(window);
+
+    let result: Result<()> = std::thread::scope(|s| {
+        // Producer: dispatch body reads and forward pending items IN ORDER. The
+        // `sync_channel(window)` send blocks once `window` items are queued,
+        // which paces how far ahead reads run.
+        s.spawn(move || {
+            for e in entries {
+                match e.kind {
+                    EntryKind::File(meta) => {
+                        let (dtx, drx) = mpsc::sync_channel::<std::io::Result<Vec<u8>>>(1);
+                        let path = e.path;
+                        rayon::spawn(move || {
+                            let _ = dtx.send(std::fs::read(&path));
+                        });
+                        if job_tx
+                            .send(Pending::File {
+                                meta,
+                                rel: e.rel,
+                                data: drx,
+                            })
+                            .is_err()
+                        {
+                            break; // writer errored and dropped the receiver
+                        }
+                    }
+                    EntryKind::Other => {
+                        if job_tx
+                            .send(Pending::Other {
+                                path: e.path,
+                                rel: e.rel,
+                            })
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+
+        // Consumer (this thread): append in walk order. On error, returning here
+        // drops `job_rx`, so the producer's next `send` fails and it unwinds —
+        // the scope then joins cleanly (no deadlock).
+        for item in job_rx {
+            match item {
+                Pending::File { meta, rel, data } => {
+                    let bytes = data
+                        .recv()
+                        .map_err(|_| anyhow::anyhow!("body reader vanished for {}", rel.display()))?
+                        .with_context(|| format!("reading {}", rel.display()))?;
+                    let mut header = tar::Header::new_gnu();
+                    header.set_metadata(&meta);
+                    header.set_size(bytes.len() as u64);
+                    builder
+                        .append_data(&mut header, &rel, &bytes[..])
+                        .with_context(|| format!("archiving {}", rel.display()))?;
+                    count += 1;
+                }
+                Pending::Other { path, rel } => {
+                    builder
+                        .append_path_with_name(&path, &rel)
+                        .with_context(|| format!("archiving {}", path.display()))?;
+                    count += 1;
+                }
+            }
+        }
+        Ok(())
+    });
+    result?;
+
     let writer = builder.into_inner().context("finalizing archive")?;
     Ok((count, writer))
 }
