@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.3.1...magebuild-v0.4.0) (2026-07-24)
+
+
+### Features
+
+* **static-deploy:** add `no_parent` option (magecommand --no-parent) ([d667e36](https://github.com/cresset-tools/magebuild/commit/d667e36b4caced746c3ed7dd0a37d045c8237d47))
+* **static-deploy:** add `no_parent` option (magecommand --no-parent) ([fce773c](https://github.com/cresset-tools/magebuild/commit/fce773c6a1fba20131404e6fe2bb7afa28525ed7))
+
 ## [0.3.1](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.3.0...magebuild-v0.3.1) (2026-07-22)
 
 
