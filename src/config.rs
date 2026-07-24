@@ -5,12 +5,23 @@
 //! Precedence: built-in defaults ← `magebuild.toml` ← CLI flags.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
 use crate::graph::{BuiltinStep, Graph, Node, NodeKind, When};
+
+/// A named bundle of graph presets — a one-flag shortcut for a common stack's
+/// build shape. Applied over the built-in defaults but UNDER `magebuild.toml`,
+/// so a project can still override any field the preset set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum Preset {
+    /// Hyvä production build (per the Hyvä deploy docs): a Tailwind
+    /// `npm run build` per discovered Hyvä theme, then a static-content deploy
+    /// with `--no-parent --no-less --no-js-bundle --no-html-minify --symlink file`.
+    Hyva,
+}
 
 /// Graph-shaping inputs from the CLI (applied last, over the toml).
 #[derive(Debug, Clone, Default)]
@@ -24,6 +35,8 @@ pub struct BuildOptions {
     /// `--deployed-version` — the static-deploy content-version signature
     /// written to `pub/static/deployed_version.txt`.
     pub deployed_version: Option<String>,
+    /// `--preset` — a named graph preset applied over the defaults, under the toml.
+    pub preset: Option<Preset>,
 }
 
 /// The five-node default Magento build graph:
@@ -60,6 +73,10 @@ pub fn default_graph() -> Graph {
                 locales: vec!["en_US".into()],
                 areas: vec!["frontend".into(), "adminhtml".into()],
                 no_parent: false,
+                no_less: false,
+                no_js_bundle: false,
+                no_html_minify: false,
+                symlink: false,
                 deployed_version: None,
                 command: None,
             },
@@ -113,6 +130,10 @@ pub struct NodeSpec {
     pub locales: Option<Vec<String>>,
     pub areas: Option<Vec<String>>,
     pub no_parent: Option<bool>,
+    pub no_less: Option<bool>,
+    pub no_js_bundle: Option<bool>,
+    pub no_html_minify: Option<bool>,
+    pub symlink: Option<bool>,
     pub deployed_version: Option<String>,
     pub exclude_from: Option<PathBuf>,
     pub output: Option<PathBuf>,
@@ -134,8 +155,14 @@ impl FileConfig {
 
 /// Build the resolved graph: defaults ← file ← CLI. Returns the graph and the
 /// effective job count.
-pub fn resolve(file: &FileConfig, opts: &BuildOptions) -> Result<(Graph, usize)> {
+pub fn resolve(file: &FileConfig, opts: &BuildOptions, root: &Path) -> Result<(Graph, usize)> {
     let mut graph = default_graph();
+
+    // A `--preset` shapes the defaults BEFORE the toml, so an explicit
+    // `magebuild.toml` still wins over the preset's choices.
+    if let Some(preset) = opts.preset {
+        apply_preset(&mut graph, preset, root);
+    }
 
     // Apply the toml node overrides/additions (sorted for determinism).
     for (id, spec) in &file.nodes {
@@ -177,6 +204,127 @@ pub fn resolve(file: &FileConfig, opts: &BuildOptions) -> Result<(Graph, usize)>
         .unwrap_or_else(default_jobs)
         .max(1);
     Ok((graph, jobs))
+}
+
+/// Shape the default graph for a named [`Preset`].
+fn apply_preset(graph: &mut Graph, preset: Preset, root: &Path) {
+    match preset {
+        Preset::Hyva => apply_hyva_preset(graph, root),
+    }
+}
+
+/// The Hyvä production build (Hyvä deploy docs): a Tailwind `npm run build` per
+/// discovered Hyvä theme, wired before a static-content deploy that runs with
+/// `--no-parent --no-less --no-js-bundle --no-html-minify --symlink file`.
+fn apply_hyva_preset(graph: &mut Graph, root: &Path) {
+    // Step 2 — the deploy flags on `static-deploy`.
+    if let Some(node) = graph.get_mut("static-deploy")
+        && let NodeKind::Native(BuiltinStep::StaticDeploy {
+            no_parent,
+            no_less,
+            no_js_bundle,
+            no_html_minify,
+            symlink,
+            ..
+        }) = &mut node.kind
+    {
+        *no_parent = true;
+        *no_less = true;
+        *no_js_bundle = true;
+        *no_html_minify = true;
+        *symlink = true;
+    }
+
+    // Step 1 — a Tailwind build per discovered Hyvä theme, before static-deploy.
+    let tailwinds = find_hyva_tailwind(root);
+    if tailwinds.is_empty() {
+        eprintln!(
+            "warning: --preset hyva found no Hyvä theme web/tailwind (with package.json) \
+             under app/design/frontend or vendor/hyva-themes; skipping the npm build step. \
+             Add it in magebuild.toml if your Tailwind lives elsewhere."
+        );
+        return;
+    }
+    let mut ids: Vec<String> = Vec::new();
+    for dir in tailwinds {
+        let mut id = tailwind_node_id(&dir);
+        // Disambiguate a rare leaf-name collision so both themes still build.
+        while graph.get(&id).is_some() || ids.contains(&id) {
+            id.push('_');
+        }
+        graph.push(Node {
+            id: id.clone(),
+            after: vec!["composer-install".into()],
+            kind: NodeKind::Command {
+                run: "npm ci --ignore-scripts && npm run build".into(),
+                cwd: Some(dir),
+                env: BTreeMap::new(),
+            },
+            when: When::Always,
+        });
+        ids.push(id);
+    }
+    // static-deploy waits for every theme's styles.css to be built.
+    if let Some(node) = graph.get_mut("static-deploy") {
+        for id in ids {
+            if !node.after.contains(&id) {
+                node.after.push(id);
+            }
+        }
+    }
+}
+
+/// Discover Hyvä `web/tailwind` build dirs (those with a `package.json`).
+/// Project themes under `app/design/frontend/<Vendor>/<name>/web/tailwind` are
+/// preferred; only if none exist do we fall back to the composer-installed
+/// `vendor/hyva-themes/<pkg>/web/tailwind` (the demo case — a vendor default
+/// theme used directly). Returns ABSOLUTE dirs (so a Command node's `cwd`
+/// resolves regardless of the process cwd), sorted for determinism.
+fn find_hyva_tailwind(root: &Path) -> Vec<PathBuf> {
+    let root = std::path::absolute(root).unwrap_or_else(|_| root.to_path_buf());
+    let mut dirs = Vec::new();
+    collect_tailwind(&root.join("app/design/frontend"), 2, &mut dirs);
+    if dirs.is_empty() {
+        collect_tailwind(&root.join("vendor/hyva-themes"), 1, &mut dirs);
+    }
+    dirs.sort();
+    dirs.dedup();
+    dirs
+}
+
+/// Walk `base` down `wildcard_levels` of subdirectories, collecting each
+/// `<dir>/web/tailwind` that holds a `package.json`.
+fn collect_tailwind(base: &Path, wildcard_levels: usize, out: &mut Vec<PathBuf>) {
+    if wildcard_levels == 0 {
+        let tw = base.join("web/tailwind");
+        if tw.join("package.json").is_file() {
+            out.push(tw);
+        }
+        return;
+    }
+    if let Ok(rd) = std::fs::read_dir(base) {
+        for entry in rd.flatten() {
+            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                collect_tailwind(&entry.path(), wildcard_levels - 1, out);
+            }
+        }
+    }
+}
+
+/// A readable, stable node id for a theme's Tailwind build, from the theme dir
+/// name (the parent of `web/tailwind`): `hyva-tailwind-<theme>`.
+fn tailwind_node_id(tailwind_dir: &Path) -> String {
+    let theme = tailwind_dir
+        .parent() // .../web
+        .and_then(Path::parent) // .../<theme>
+        .and_then(Path::file_name)
+        .map(|s| s.to_string_lossy().to_lowercase())
+        .unwrap_or_else(|| "theme".into());
+    let slug: String = theme
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    format!("hyva-tailwind-{slug}")
 }
 
 /// Apply one `NodeSpec` to the graph (mutating an existing node or adding a new
@@ -256,6 +404,10 @@ fn override_step(step: &mut BuiltinStep, spec: &NodeSpec) {
             locales,
             areas,
             no_parent,
+            no_less,
+            no_js_bundle,
+            no_html_minify,
+            symlink,
             deployed_version,
             ..
         } => {
@@ -270,6 +422,18 @@ fn override_step(step: &mut BuiltinStep, spec: &NodeSpec) {
             }
             if let Some(v) = spec.no_parent {
                 *no_parent = v;
+            }
+            if let Some(v) = spec.no_less {
+                *no_less = v;
+            }
+            if let Some(v) = spec.no_js_bundle {
+                *no_js_bundle = v;
+            }
+            if let Some(v) = spec.no_html_minify {
+                *no_html_minify = v;
+            }
+            if let Some(v) = spec.symlink {
+                *symlink = v;
             }
             if let Some(v) = &spec.deployed_version {
                 *deployed_version = Some(v.clone());
@@ -329,6 +493,7 @@ mod tests {
                 artifact: Some(PathBuf::from("out.tar.gz")),
                 ..Default::default()
             },
+            Path::new("."),
         )
         .unwrap();
         let pkg = g.get("package").unwrap();
@@ -354,7 +519,7 @@ mod tests {
             "#,
         )
         .unwrap();
-        let (g, jobs) = resolve(&file, &BuildOptions::default()).unwrap();
+        let (g, jobs) = resolve(&file, &BuildOptions::default(), Path::new(".")).unwrap();
         assert_eq!(jobs, 3);
         match &g.get("di-compile").unwrap().kind {
             NodeKind::Native(BuiltinStep::DiCompile { fused }) => assert!(*fused),
@@ -377,7 +542,7 @@ mod tests {
             "#,
         )
         .unwrap();
-        let (g, _) = resolve(&file, &BuildOptions::default()).unwrap();
+        let (g, _) = resolve(&file, &BuildOptions::default(), Path::new(".")).unwrap();
         match &g.get("autoload-dump").unwrap().kind {
             NodeKind::Command { run, .. } => {
                 assert_eq!(run, "composer dump-autoload -o --no-dev");
@@ -399,7 +564,7 @@ mod tests {
             "#,
         )
         .unwrap();
-        let (g, _) = resolve(&file, &BuildOptions::default()).unwrap();
+        let (g, _) = resolve(&file, &BuildOptions::default(), Path::new(".")).unwrap();
         assert!(g.get("my-assets").is_some());
         let pkg = g.get("package").unwrap();
         assert!(pkg.after.contains(&"my-assets".to_string()));
@@ -416,11 +581,63 @@ mod tests {
             "#,
         )
         .unwrap();
-        assert!(resolve(&file, &BuildOptions::default()).is_err());
+        assert!(resolve(&file, &BuildOptions::default(), Path::new(".")).is_err());
     }
 
     #[test]
     fn unknown_top_level_key_is_rejected() {
         assert!(toml::from_str::<FileConfig>("[nope]\nx = 1\n").is_err());
+    }
+
+    #[test]
+    fn hyva_preset_sets_flags_and_wires_tailwind_build() {
+        // A synthetic root with a composer-installed Hyvä theme's web/tailwind.
+        let base = std::env::temp_dir().join(format!("magebuild-hyva-{}", std::process::id()));
+        let tw = base.join("vendor/hyva-themes/acme-theme/web/tailwind");
+        std::fs::create_dir_all(&tw).unwrap();
+        std::fs::write(tw.join("package.json"), "{}").unwrap();
+
+        let opts = BuildOptions {
+            preset: Some(Preset::Hyva),
+            ..Default::default()
+        };
+        let (g, _) = resolve(&FileConfig::default(), &opts, &base).unwrap();
+
+        // Step 2 — every Hyvä deploy flag is set on static-deploy.
+        match &g.get("static-deploy").unwrap().kind {
+            NodeKind::Native(BuiltinStep::StaticDeploy {
+                no_parent,
+                no_less,
+                no_js_bundle,
+                no_html_minify,
+                symlink,
+                ..
+            }) => assert!(
+                *no_parent && *no_less && *no_js_bundle && *no_html_minify && *symlink,
+                "all Hyvä deploy flags must be on"
+            ),
+            _ => panic!("static-deploy is not a StaticDeploy step"),
+        }
+
+        // Step 1 — a Tailwind build node the deploy depends on, cwd at the theme.
+        let id = "hyva-tailwind-acme-theme";
+        let node = g.get(id).expect("tailwind node added");
+        match &node.kind {
+            NodeKind::Command { run, cwd, .. } => {
+                assert_eq!(run, "npm ci --ignore-scripts && npm run build");
+                assert_eq!(cwd.as_deref(), Some(tw.as_path()));
+            }
+            _ => panic!("tailwind node is not a command"),
+        }
+        assert!(node.after.contains(&"composer-install".to_string()));
+        assert!(
+            g.get("static-deploy")
+                .unwrap()
+                .after
+                .contains(&id.to_string()),
+            "static-deploy must wait for the tailwind build"
+        );
+
+        std::fs::remove_dir_all(&base).ok();
     }
 }

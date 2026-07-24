@@ -72,6 +72,12 @@ struct Cli {
     #[arg(long, global = true)]
     profile: bool,
 
+    /// Apply a named build preset over the defaults (still under magebuild.toml).
+    /// `hyva` = Tailwind `npm run build` per Hyvä theme, then a static deploy
+    /// with --no-parent --no-less --no-js-bundle --no-html-minify --symlink=file.
+    #[arg(long, value_enum, global = true)]
+    preset: Option<crate::config::Preset>,
+
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -112,8 +118,9 @@ fn run() -> Result<ExitCode> {
         exclude_from: cli.exclude_from.clone(),
         jobs: cli.jobs,
         deployed_version: cli.deployed_version.clone(),
+        preset: cli.preset,
     };
-    let (mut graph, jobs) = config::resolve(&file, &opts)?;
+    let (mut graph, jobs) = config::resolve(&file, &opts, &root)?;
 
     // `--only` / `node <id>` restrict; `--skip` marks Never.
     let target = match &cli.command {
