@@ -37,6 +37,17 @@ composer require --dev cresset/magebuild
 This puts `magebuild` in `vendor/bin/`; the package fetches the prebuilt binary
 for your platform on first run (checksum-verified, cached).
 
+### Without installing (bgx)
+
+[bougie](https://bougie.tools)'s `bgx` (like npx) runs magebuild in an isolated,
+globally-cached environment without adding it to your project. Everything after
+the package is forwarded straight to magebuild:
+
+```console
+$ bgx cresset/magebuild plan
+$ bgx cresset/magebuild --artifact release.tar.zst
+```
+
 ## Usage
 
 ```sh
