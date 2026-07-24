@@ -133,7 +133,11 @@ impl BuiltinStep {
                 if *no_parent { " --no-parent" } else { "" },
                 if *no_less { " --no-less" } else { "" },
                 if *no_js_bundle { " --no-js-bundle" } else { "" },
-                if *no_html_minify { " --no-html-minify" } else { "" },
+                if *no_html_minify {
+                    " --no-html-minify"
+                } else {
+                    ""
+                },
                 if *symlink { " --symlink=file" } else { "" },
                 deployed_version
                     .as_deref()
