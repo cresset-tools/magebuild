@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.5.0...magebuild-v0.6.0) (2026-07-24)
+
+
+### Features
+
+* **static-deploy:** MAGEBUILD_SYMLINK env toggle + document symlink ([1e49e9b](https://github.com/cresset-tools/magebuild/commit/1e49e9b447aab075b2f964563404884d942fd938))
+* **static-deploy:** MAGEBUILD_SYMLINK env toggle + document symlink ([a197404](https://github.com/cresset-tools/magebuild/commit/a197404b1a442774a087b063bcb43cbcc0d67a60))
+
 ## [0.5.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.4.0...magebuild-v0.5.0) (2026-07-24)
 
 
