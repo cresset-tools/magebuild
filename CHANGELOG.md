@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.4.0...magebuild-v0.5.0) (2026-07-24)
+
+
+### Features
+
+* adopt magequery 0.15.0 deploy flags + --preset hyva ([58203fc](https://github.com/cresset-tools/magebuild/commit/58203fc3a294d4830f5ea4a17d4082d6d43f19fa))
+* **preset:** adopt magequery 0.15.0 deploy flags + --preset hyva ([aff3fff](https://github.com/cresset-tools/magebuild/commit/aff3ffff447954418c5a4be0ef6c5df98ef7a0a3))
+
+
+### Performance Improvements
+
+* parallelize file reads in the package step ([db27146](https://github.com/cresset-tools/magebuild/commit/db27146bdcab5b43589d6c47a6b4e58d3a496469))
+* parallelize file reads in the package step ([c5e67b4](https://github.com/cresset-tools/magebuild/commit/c5e67b43380854e6a7228aed9b678b7d7cf8bf0c))
+
 ## [0.4.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.3.1...magebuild-v0.4.0) (2026-07-24)
 
 
