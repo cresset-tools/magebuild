@@ -58,6 +58,17 @@ pub enum BuiltinStep {
         /// signature stock SCD takes as `--content-version` (cache-busting).
         /// `None` ⇒ don't write the file (never an invented timestamp).
         deployed_version: Option<String>,
+        /// Materialize pure-copy files (images, fonts, verbatim JS) as RELATIVE
+        /// symlinks back to their `vendor/`/`app/`/`lib/web/` source instead of
+        /// byte copies; derived files (LESS-compiled, css-processed, generated)
+        /// stay real. Off by default. Safe for a magebuild artifact — it ships
+        /// `vendor` beside `pub/static`, so the relative links resolve after
+        /// extraction — and a large win: the deploy stops writing (and `package`
+        /// stops re-reading) gigabytes of duplicated asset bytes. Requires the
+        /// serve-time web server to follow symlinks (nginx's default). Opt in via
+        /// magebuild.toml (`[nodes.static-deploy] symlink = true`) or the
+        /// `MAGEBUILD_SYMLINK` env.
+        symlink: bool,
         /// Shell-out override for a bespoke deploy invocation; `None` ⇒ the
         /// in-process engine call.
         command: Option<String>,
@@ -106,13 +117,15 @@ impl BuiltinStep {
                 areas,
                 no_parent,
                 deployed_version,
+                symlink,
                 ..
             } => format!(
-                "static-deploy themes={} locales={} areas={}{}{}",
+                "static-deploy themes={} locales={} areas={}{}{}{}",
                 themes.join(","),
                 locales.join(","),
                 areas.join(","),
                 if *no_parent { " --no-parent" } else { "" },
+                if *symlink { " --symlink" } else { "" },
                 deployed_version
                     .as_deref()
                     .map(|v| format!(" version={v}"))

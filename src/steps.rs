@@ -52,6 +52,7 @@ fn run_builtin(step: &BuiltinStep, ctx: &Ctx) -> Result<()> {
             areas,
             no_parent,
             deployed_version,
+            symlink,
             command,
         } => static_deploy(
             &ctx.root,
@@ -60,6 +61,7 @@ fn run_builtin(step: &BuiltinStep, ctx: &Ctx) -> Result<()> {
             areas,
             *no_parent,
             deployed_version.as_deref(),
+            *symlink,
             command.as_deref(),
         ),
         BuiltinStep::AutoloadDump { no_dev, optimize } => {
@@ -202,6 +204,7 @@ fn autoload_dump(root: &Path, no_dev: bool, optimize: bool) -> Result<()> {
 /// (`static_deploy::deploy::deploy_to_disk`), the same entry point the
 /// `magecommand static deploy` CLI drives. An explicit `command` override still
 /// shells out (the escape hatch for a bespoke deploy invocation).
+#[allow(clippy::too_many_arguments)]
 fn static_deploy(
     root: &Path,
     themes: &[String],
@@ -209,6 +212,7 @@ fn static_deploy(
     areas: &[String],
     no_parent: bool,
     deployed_version: Option<&str>,
+    symlink: bool,
     command: Option<&str>,
 ) -> Result<()> {
     // An explicit override wins — honor a bespoke deploy command verbatim.
@@ -217,10 +221,21 @@ fn static_deploy(
     }
 
     use magecommand::static_deploy::deploy as sdd;
+    use magecommand::static_deploy::files::Symlink;
 
     // magebuild's `"*"` sentinel = "all deployable themes"; an empty theme
     // filter makes `deploy_to_disk` discover every registered theme.
     let themes: Vec<String> = themes.iter().filter(|t| *t != "*").cloned().collect();
+
+    // Symlink-to-source mode: pure-copy files become relative symlinks into
+    // `vendor/`/`app/`/`lib/web/` instead of duplicated bytes. Safe here because
+    // the artifact ships those sources beside `pub/static`. Opt in via
+    // magebuild.toml (`[nodes.static-deploy] symlink = true`) or MAGEBUILD_SYMLINK.
+    let symlink = if symlink || std::env::var_os("MAGEBUILD_SYMLINK").is_some() {
+        Symlink::ToSource
+    } else {
+        Symlink::None
+    };
 
     let req = sdd::DeployRequest {
         locales: locales.to_vec(),
@@ -230,8 +245,12 @@ fn static_deploy(
         order: sdd::Order::Probe(None), // the CLI default — byte-faithful readdir order
         no_parent,                      // default false: a child theme pulls in its parents
         deployed_version: deployed_version.map(str::to_string),
-        jobs: None,         // rayon global pool — overlaps di-compile's own pool
-        no_compress: false, // production-mode compressed CSS
+        jobs: None,          // rayon global pool — overlaps di-compile's own pool
+        no_compress: false,  // production-mode compressed CSS
+        no_less: false,      // compile LESS (full production deploy)
+        no_js_bundle: false, // generate RequireJS bundles
+        no_html_minify: false, // parity no-op (magecommand never minifies html)
+        symlink,
     };
 
     let summary = sdd::deploy_to_disk(root, &req).map_err(|e| anyhow::anyhow!("{e:#}"))?;
