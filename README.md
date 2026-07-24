@@ -60,7 +60,24 @@ magebuild --json                       # machine-readable output
 ```
 
 Common flags: `--jobs N`, `--only <ids>`, `--skip <ids>`, `--dry-run`,
-`--profile`, `--deployed-version <v>`, `--exclude-from <file>`.
+`--profile`, `--preset <name>`, `--deployed-version <v>`, `--exclude-from <file>`.
+
+### Presets
+
+`--preset hyva` shapes the graph for a [Hyvä](https://hyva.io) production build,
+following the Hyvä deploy docs:
+
+1. a Tailwind `npm ci --ignore-scripts && npm run build` per discovered Hyvä
+   theme (`app/design/frontend/*/*/web/tailwind` if you have a project theme,
+   else `vendor/hyva-themes/*/web/tailwind`), wired to run before static-deploy;
+2. a static-content deploy with `--no-parent --no-less --no-js-bundle
+   --no-html-minify --symlink=file` — Hyvä ships pre-built Tailwind CSS and no
+   RequireJS bundles, and `--symlink=file` makes every byte-identical asset a
+   relative symlink to its `vendor/app/lib` source instead of copying it
+   (smaller, faster; the artifact already ships `vendor` beside `pub/static`).
+
+The preset is applied over the built-in defaults but **under** `magebuild.toml`,
+so any field it sets can still be overridden per node.
 
 Packaging picks the compressor from the artifact extension: `.tar` (none),
 `.tar.gz` (parallel gzip), `.tar.zst` (multi-threaded zstd). Both compressors

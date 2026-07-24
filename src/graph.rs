@@ -54,6 +54,20 @@ pub enum BuiltinStep {
         /// storefront whose only Luma use is the fallback checkout: Magento/luma
         /// ships, but its parent Magento/blank need not.
         no_parent: bool,
+        /// Skip LESS compilation (magecommand `--no-less`). Hyvä's Tailwind
+        /// output is a plain `.css`, so there is no `.less` to compile.
+        no_less: bool,
+        /// Skip `js/bundle/bundle<N>.js` generation (magecommand
+        /// `--no-js-bundle`). Hyvä doesn't use RequireJS bundles.
+        no_js_bundle: bool,
+        /// Accepted for Magento parity (`--no-html-minify`); a no-op in
+        /// magecommand, which byte-copies `.html` and never minifies it.
+        no_html_minify: bool,
+        /// Materialize pure-copy assets as relative symlinks to their
+        /// `vendor/app/lib` source (magecommand `--symlink file`) instead of
+        /// copying — smaller, faster output when the artifact ships `vendor`
+        /// beside `pub/static` (magebuild's model).
+        symlink: bool,
         /// `pub/static/deployed_version.txt` contents — the asset-version
         /// signature stock SCD takes as `--content-version` (cache-busting).
         /// `None` ⇒ don't write the file (never an invented timestamp).
@@ -105,14 +119,26 @@ impl BuiltinStep {
                 locales,
                 areas,
                 no_parent,
+                no_less,
+                no_js_bundle,
+                no_html_minify,
+                symlink,
                 deployed_version,
                 ..
             } => format!(
-                "static-deploy themes={} locales={} areas={}{}{}",
+                "static-deploy themes={} locales={} areas={}{}{}{}{}{}{}",
                 themes.join(","),
                 locales.join(","),
                 areas.join(","),
                 if *no_parent { " --no-parent" } else { "" },
+                if *no_less { " --no-less" } else { "" },
+                if *no_js_bundle { " --no-js-bundle" } else { "" },
+                if *no_html_minify {
+                    " --no-html-minify"
+                } else {
+                    ""
+                },
+                if *symlink { " --symlink=file" } else { "" },
                 deployed_version
                     .as_deref()
                     .map(|v| format!(" version={v}"))

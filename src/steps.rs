@@ -52,6 +52,10 @@ fn run_builtin(step: &BuiltinStep, ctx: &Ctx) -> Result<()> {
             locales,
             areas,
             no_parent,
+            no_less,
+            no_js_bundle,
+            no_html_minify,
+            symlink,
             deployed_version,
             command,
         } => static_deploy(
@@ -60,6 +64,10 @@ fn run_builtin(step: &BuiltinStep, ctx: &Ctx) -> Result<()> {
             locales,
             areas,
             *no_parent,
+            *no_less,
+            *no_js_bundle,
+            *no_html_minify,
+            *symlink,
             deployed_version.as_deref(),
             command.as_deref(),
         ),
@@ -203,12 +211,17 @@ fn autoload_dump(root: &Path, no_dev: bool, optimize: bool) -> Result<()> {
 /// (`static_deploy::deploy::deploy_to_disk`), the same entry point the
 /// `magecommand static deploy` CLI drives. An explicit `command` override still
 /// shells out (the escape hatch for a bespoke deploy invocation).
+#[allow(clippy::too_many_arguments)]
 fn static_deploy(
     root: &Path,
     themes: &[String],
     locales: &[String],
     areas: &[String],
     no_parent: bool,
+    no_less: bool,
+    no_js_bundle: bool,
+    no_html_minify: bool,
+    symlink: bool,
     deployed_version: Option<&str>,
     command: Option<&str>,
 ) -> Result<()> {
@@ -218,6 +231,7 @@ fn static_deploy(
     }
 
     use magecommand::static_deploy::deploy as sdd;
+    use magecommand::static_deploy::files as sdf;
 
     // magebuild's `"*"` sentinel = "all deployable themes"; an empty theme
     // filter makes `deploy_to_disk` discover every registered theme.
@@ -230,6 +244,14 @@ fn static_deploy(
         out: None,                      // default: <root>/pub/static
         order: sdd::Order::Probe(None), // the CLI default — byte-faithful readdir order
         no_parent,                      // default false: a child theme pulls in its parents
+        no_less,                        // Hyvä: no LESS to compile (Tailwind is plain css)
+        no_js_bundle,                   // Hyvä: no RequireJS bundles
+        no_html_minify,                 // parity no-op (magecommand never minifies html)
+        symlink: if symlink {
+            sdf::Symlink::ToSource
+        } else {
+            sdf::Symlink::None
+        },
         deployed_version: deployed_version.map(str::to_string),
         jobs: None,         // rayon global pool — overlaps di-compile's own pool
         no_compress: false, // production-mode compressed CSS
