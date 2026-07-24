@@ -68,6 +68,7 @@ fused = true                       # fused interceptors
 
 [nodes.static-deploy]
 locales = ["en_US", "nl_NL"]
+no_parent = true                   # don't deploy a theme's parent(s); see below
 
 [nodes.composer-install]
 hardlink = true                    # see below — off by default
@@ -85,6 +86,15 @@ uncompressed* store — self-hosted CI with a cache disk, a Docker layer, or
 repeated local builds. On ephemeral CI that restores the store from a compressed
 `actions/cache`, the restore re-decompresses everything, so a plain extract is
 just as fast.
+
+`no_parent` (static-deploy, off by default) maps to magecommand's `--no-parent`:
+a child theme normally pulls its ancestor themes into the deploy (Magento's quick
+strategy). With it **on**, only the themes you deploy are emitted. Static deploy
+resolves the parent→child fallback from *source* at deploy time, so the child
+tree is self-contained and the parent theme's own `pub/static` output is
+redundant when nothing serves it — e.g. a Hyvä storefront that only touches
+`Magento/luma` via the fallback checkout doesn't need `Magento/blank` shipped.
+Leave it off unless you know the parent is never requested at runtime.
 
 ## Deployer integration
 
