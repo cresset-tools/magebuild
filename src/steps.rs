@@ -245,10 +245,10 @@ fn static_deploy(
         order: sdd::Order::Probe(None), // the CLI default — byte-faithful readdir order
         no_parent,                      // default false: a child theme pulls in its parents
         deployed_version: deployed_version.map(str::to_string),
-        jobs: None,          // rayon global pool — overlaps di-compile's own pool
-        no_compress: false,  // production-mode compressed CSS
-        no_less: false,      // compile LESS (full production deploy)
-        no_js_bundle: false, // generate RequireJS bundles
+        jobs: None,            // rayon global pool — overlaps di-compile's own pool
+        no_compress: false,    // production-mode compressed CSS
+        no_less: false,        // compile LESS (full production deploy)
+        no_js_bundle: false,   // generate RequireJS bundles
         no_html_minify: false, // parity no-op (magecommand never minifies html)
         symlink,
     };
