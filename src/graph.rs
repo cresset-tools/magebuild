@@ -66,7 +66,9 @@ pub enum BuiltinStep {
         /// Materialize pure-copy assets as relative symlinks to their
         /// `vendor/app/lib` source (magecommand `--symlink file`) instead of
         /// copying — smaller, faster output when the artifact ships `vendor`
-        /// beside `pub/static` (magebuild's model).
+        /// beside `pub/static` (magebuild's model). Opt in via magebuild.toml
+        /// (`[nodes.static-deploy] symlink = true`), `--preset hyva`, or the
+        /// `MAGEBUILD_SYMLINK` env (mirroring `hardlink`'s `MAGEBUILD_HARDLINK`).
         symlink: bool,
         /// `pub/static/deployed_version.txt` contents — the asset-version
         /// signature stock SCD takes as `--content-version` (cache-busting).

@@ -237,6 +237,13 @@ fn static_deploy(
     // filter makes `deploy_to_disk` discover every registered theme.
     let themes: Vec<String> = themes.iter().filter(|t| *t != "*").cloned().collect();
 
+    // Symlink-to-source: pure-copy files become relative symlinks into
+    // `vendor/`/`app/`/`lib/web/` instead of duplicated bytes (safe here — the
+    // artifact ships those sources beside `pub/static`). Opt in via
+    // magebuild.toml / `--preset hyva` (`symlink = true`) or the MAGEBUILD_SYMLINK
+    // env, mirroring `hardlink`'s MAGEBUILD_HARDLINK toggle.
+    let symlink = symlink || std::env::var_os("MAGEBUILD_SYMLINK").is_some();
+
     let req = sdd::DeployRequest {
         locales: locales.to_vec(),
         themes,
