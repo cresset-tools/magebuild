@@ -18,11 +18,14 @@ composer-install → { di-compile → autoload-dump } ∥ { static-deploy } → 
 
 ## Install
 
-### curl (Linux / macOS)
+### Install script
 
-```sh
-curl --proto '=https' --tlsv1.2 -LsSf \
-  https://github.com/cresset-tools/magebuild/releases/latest/download/magebuild-installer.sh | sh
+```console
+# Linux and macOS
+$ curl --proto '=https' --tlsv1.2 -LsSf https://bougie.tools/magebuild.sh | sh
+
+# Windows (PowerShell)
+> irm https://bougie.tools/magebuild.ps1 | iex
 ```
 
 Prebuilt binaries ship for Linux (gnu and musl, x86_64 and arm64), macOS
