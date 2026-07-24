@@ -322,21 +322,29 @@ mod tests {
 
     #[test]
     fn parallelism_actually_overlaps() {
-        // Two independent sleeping nodes overlap at jobs=2, so the wall is
-        // meaningfully shorter than the same work forced serial (jobs=1).
-        // Comparing against a serial baseline measured on THIS machine keeps the
-        // test robust on slow / contended CI runners — a fixed millisecond bound
-        // flakes there even when the overlap is real.
+        // Two independent nodes at jobs=2 must be LIVE at the same instant.
+        // Assert the observed peak concurrency directly (an atomic counter), not
+        // a wall-clock ratio: comparing parallel-vs-serial wall time flakes on
+        // slow / contended CI runners where thread-spawn + scheduler overhead
+        // swamps two short sleeps, even though the overlap is real. The sleep
+        // just holds both tasks live long enough to observe the peak.
         let graph = Graph::new(vec![io("x", &[]), io("y", &[])]);
-        let runner: Arc<Runner> = Arc::new(|_node| {
-            std::thread::sleep(Duration::from_millis(60));
+        let live = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let (live2, peak2) = (live.clone(), peak.clone());
+        let runner: Arc<Runner> = Arc::new(move |_node| {
+            let now = live2.fetch_add(1, Ordering::SeqCst) + 1;
+            peak2.fetch_max(now, Ordering::SeqCst);
+            std::thread::sleep(Duration::from_millis(50));
+            live2.fetch_sub(1, Ordering::SeqCst);
             Ok(())
         });
-        let serial = run(&graph, 1, runner.clone(), Arc::new(SilentObserver)).wall;
-        let parallel = run(&graph, 2, runner, Arc::new(SilentObserver)).wall;
-        assert!(
-            parallel * 4 < serial * 3,
-            "no overlap: parallel {parallel:?} not < 0.75 * serial {serial:?}"
+        let report = run(&graph, 2, runner, Arc::new(SilentObserver));
+        assert!(!report.failed);
+        assert_eq!(
+            peak.load(Ordering::SeqCst),
+            2,
+            "two independent nodes at jobs=2 must run concurrently"
         );
     }
 

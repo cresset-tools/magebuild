@@ -1,0 +1,96 @@
+# Keep magebuild's pinned magequery/magecommand engines on the latest release.
+#
+# magebuild links magequery-core + magecommand-engine + magecommand as git deps
+# pinned to an exact commit (Cargo.toml `rev = ...`). This job resolves the
+# newest `magequery-v*` release to its commit, re-pins all three, refreshes
+# Cargo.lock, and opens/updates ONE PR (branch: chore/bump-magequery).
+#
+# It opens a PR rather than auto-merging on purpose: a magequery minor can
+# restructure the engine API (0.13 -> 0.14 moved crates around), so the bump
+# rides the normal PR CI (cargo test on 3 OSes + clippy) and a human glances
+# before merge. Flip to auto-merge by adding `gh pr merge --auto --squash` on
+# the created PR if you'd rather.
+#
+# The PR is authored via the release-please bot app (same client-id) so its CI
+# actually runs — PRs opened with the default GITHUB_TOKEN don't trigger
+# workflows.
+#
+# Triggered by magequery: its release workflow sends a `repository_dispatch`
+# (type `magequery-release`) here right after publishing a release, so the bump
+# PR opens within seconds of the release — no polling. Also runnable by hand via
+# the Actions "Run workflow" button.
+name: bump-magequery
+
+on:
+  repository_dispatch:
+    types: [magequery-release]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint app token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: Iv23liCDQHGQVKPD1b41
+          private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Re-pin to the latest magequery release
+        id: bump
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          # Newest published magequery release -> the commit its tag points at.
+          tag=$(gh release view --repo cresset-tools/magequery --json tagName -q .tagName)
+          new=$(gh api "repos/cresset-tools/magequery/commits/${tag}" -q .sha)
+          cur=$(grep -oE 'rev = "[a-f0-9]{7,}"' Cargo.toml | head -1 | grep -oE '[a-f0-9]{7,}')
+          echo "latest release ${tag} -> ${new}"
+          echo "current pin       -> ${cur}"
+          if [ "${new}" = "${cur}" ]; then
+            echo "Already on the latest release — nothing to do."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Re-pin all three git deps (they share the rev) + refresh the lock so
+          # the PR builds without a stale [[package]] entry.
+          sed -i "s/${cur}/${new}/g" Cargo.toml
+          cargo update -p magequery-core -p magecommand-engine -p magecommand
+          {
+            echo "changed=true"
+            echo "tag=${tag}"
+            echo "new=${new}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open/update the bump PR
+        if: steps.bump.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          branch: chore/bump-magequery
+          add-paths: |
+            Cargo.toml
+            Cargo.lock
+          commit-message: "chore(deps): bump magequery/magecommand to ${{ steps.bump.outputs.tag }}"
+          title: "chore(deps): bump magequery/magecommand to ${{ steps.bump.outputs.tag }}"
+          body: |
+            Automated re-pin of `magequery-core` / `magecommand-engine` / `magecommand`
+            to the latest magequery release **${{ steps.bump.outputs.tag }}**
+            (`${{ steps.bump.outputs.new }}`), with a refreshed `Cargo.lock`.
+
+            Review before merge — a magequery minor can restructure the engine API,
+            so let CI (cargo test × 3 OSes + clippy) confirm the build first.
+
+            _Opened by the `bump-magequery` workflow._
