@@ -18,10 +18,12 @@ magecommand-engine = { git = "https://github.com/cresset-tools/magequery", rev =
 magecommand = { git = "https://github.com/cresset-tools/magequery", rev = "49acfcc363e923fe611e5d8c1374e7eb6204bbfd" }
 
 # Composer client — crates.io. composer-install (install-from-lock),
-# composer-autoload (optimized dump-autoload), composer-manifest (lockfile model).
+# composer-autoload (optimized dump-autoload), composer-manifest (lockfile model),
+# composer-patches (apply a project's `patches/` dir, like bigbridge/patcher).
 composer-install = "0.2"
 composer-autoload = "0.1"
 composer-manifest = "0.1"
+composer-patches = "0.1"
 
 # CLI + orchestration.
 clap = { version = "4", features = ["derive"] }
@@ -37,6 +39,7 @@ gzp = { version = "0.11", default-features = false, features = ["deflate_default
 zstd = { version = "0.13", features = ["zstdmt"] }
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 anyhow = "1"
 tracing = "0.1"
 

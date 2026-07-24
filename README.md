@@ -116,6 +116,18 @@ repeated local builds. On ephemeral CI that restores the store from a compressed
 `actions/cache`, the restore re-decompresses everything, so a plain extract is
 just as fast.
 
+**Composer patches.** composer-install applies a project's `patches/` directory
+automatically (zero-config — the same convention as `bigbridge/patcher`), so the
+installed tree matches a real `composer install` even though the in-process
+installer skips composer plugins. Each `*.patch` file's target package and strip
+depth are inferred from its diff; package patches apply inside `vendor/<pkg>`,
+project-root patches at the root. Application is idempotent — the applied set is
+fingerprinted in `patches.lock.json`, so a re-run only re-patches packages whose
+patch set changed, and a failing patch aborts the build (never a silently
+unpatched tree). Projects with no `patches/` dir are unaffected. This is what
+makes, e.g., a Hyvä store's checkout modules Tailwind-v4-clean before the
+`--preset hyva` Tailwind build runs.
+
 `no_parent` (static-deploy, off by default) maps to magecommand's `--no-parent`:
 a child theme normally pulls its ancestor themes into the deploy (Magento's quick
 strategy). With it **on**, only the themes you deploy are emitted. Static deploy

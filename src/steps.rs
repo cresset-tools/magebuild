@@ -136,18 +136,135 @@ fn composer_install(
         progress: &composer_install::NoProgress,
         cache_root: &cache,
     };
+    // Build a patch plan from the project's `patches/` directory (the
+    // `bigbridge/patcher` zero-config convention) and hand it to the installer.
+    // The in-process installer skips composer plugins, so without this a
+    // patch-dependent project (e.g. Hyvä checkout modules whose CSS a
+    // `Tailwind-4.patch` makes v4-compatible) would get an UNPATCHED vendor tree
+    // here — diverging from production and breaking downstream steps (the Hyvä
+    // Tailwind build, di-compile). The installer applies the plan idempotently:
+    // it re-extracts any package whose patch fingerprint changed to a pristine
+    // state before patching, and records the applied set in `patches.lock.json`,
+    // so a second run is a no-op rather than a double-apply. `None` (no plan)
+    // when there is no `patches/` dir.
+    let plan = build_patch_plan(root)?;
+
     let summary = composer_install::install_from_lock_with_patches(
         &env,
         root,
         composer_install::InstallOptions { no_dev, link_mode },
         None,
-        None,
+        plan.as_ref(),
     )
     .map_err(|e| anyhow::anyhow!("{e:#}"))?;
     for w in &summary.warnings {
         eprintln!("  warning (composer): {w}");
     }
+    if let Some(plan) = &plan {
+        let n = plan.patches.values().map(Vec::len).sum::<usize>() + plan.root_patches.len();
+        eprintln!("  composer-install: patch plan = {n} patch(es) from patches/");
+    }
+
     Ok(())
+}
+
+/// Resolve `<root>/patches` (the `bigbridge/patcher` zero-config directory) into
+/// a [`composer_patches::PatchPlan`] the installer applies during install. Each
+/// `*.patch` file's target package + strip depth are inferred from its diff
+/// header paths ([`composer_patches::resolve_patches_dir`]); package-scoped
+/// patches are keyed by target (applied inside `vendor/<pkg>`), root-scoped
+/// patches (a diff spanning several packages) apply once at the project root.
+/// Prior applied fingerprints are loaded from `patches.lock.json` so the plan is
+/// idempotent across runs. Returns `None` when there is no `patches/` dir.
+fn build_patch_plan(root: &Path) -> Result<Option<composer_patches::PatchPlan>> {
+    use composer_patches::{
+        FailureMode, MaterializedPatch, PatchPlan, PatchScope, PatchSource, RootPatch,
+    };
+    use std::collections::BTreeMap;
+
+    let patches_dir = root.join("patches");
+    if !patches_dir.is_dir() {
+        return Ok(None);
+    }
+
+    // `resolve_patches_dir` infers each patch's target by matching its diff paths
+    // against the installed packages, so it needs the package→dir map. The
+    // in-process installer lays every package out flat at `vendor/<name>`, so
+    // that is the whole map.
+    let install_paths = lock_install_paths(root)?;
+    let patches = composer_patches::resolve_patches_dir(&patches_dir, &install_paths, &[])
+        .map_err(|e| anyhow::anyhow!("resolving {}: {e:#}", patches_dir.display()))?;
+    if patches.is_empty() {
+        return Ok(None);
+    }
+
+    let mut by_target: BTreeMap<String, Vec<MaterializedPatch>> = BTreeMap::new();
+    let mut root_patches: Vec<RootPatch> = Vec::new();
+    for p in &patches {
+        let PatchSource::Local(path) = &p.source else {
+            eprintln!(
+                "  warning (patches): skipping remote patch `{}` (unsupported)",
+                p.description
+            );
+            continue;
+        };
+        let bytes =
+            std::fs::read(path).with_context(|| format!("reading patch {}", path.display()))?;
+        let mp = MaterializedPatch {
+            description: p.description.clone(),
+            origin: path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| p.description.clone()),
+            local_path: path.clone(),
+            content_sha256: composer_patches::content_sha256(&bytes),
+            depth: p.depth,
+        };
+        match &p.scope {
+            PatchScope::Root { packages } => root_patches.push(RootPatch {
+                patch: mp,
+                packages: packages.clone(),
+            }),
+            _ => by_target.entry(p.target.clone()).or_default().push(mp),
+        }
+    }
+
+    Ok(Some(PatchPlan {
+        patches: by_target,
+        root_patches,
+        // Prior state → the installer skips packages already at the desired
+        // fingerprint (idempotent), re-extracts+re-applies ones whose patch set
+        // changed.
+        applied: composer_patches::lock::read(root),
+        // Fail the build on a patch that doesn't apply — never silently ship an
+        // unpatched tree (production's patcher aborts too).
+        failure_mode: FailureMode::Abort,
+        skip_report: false,
+        write_lock: true,
+    }))
+}
+
+/// The package→install-dir map for [`build_patch_plan`]: every package in
+/// `composer.lock` (runtime + dev) at its flat `vendor/<name>` location, which
+/// is where the in-process installer puts them (it does not relocate via
+/// composer/installers).
+fn lock_install_paths(root: &Path) -> Result<Vec<(String, String)>> {
+    let lock_path = root.join("composer.lock");
+    let bytes =
+        std::fs::read(&lock_path).with_context(|| format!("reading {}", lock_path.display()))?;
+    let lock: serde_json::Value = serde_json::from_slice(&bytes)
+        .with_context(|| format!("parsing {}", lock_path.display()))?;
+    let mut out = Vec::new();
+    for key in ["packages", "packages-dev"] {
+        if let Some(arr) = lock.get(key).and_then(|v| v.as_array()) {
+            for pkg in arr {
+                if let Some(name) = pkg.get("name").and_then(|n| n.as_str()) {
+                    out.push((name.to_string(), format!("vendor/{name}")));
+                }
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// `setup:di:compile`, in-process — the exact sequence the `magecommand` CLI
