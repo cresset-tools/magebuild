@@ -97,6 +97,7 @@ fused = true                       # fused interceptors
 [nodes.static-deploy]
 locales = ["en_US", "nl_NL"]
 no_parent = true                   # don't deploy a theme's parent(s); see below
+symlink = true                     # symlink pure copies to source; see below
 
 [nodes.composer-install]
 hardlink = true                    # see below — off by default
@@ -123,6 +124,20 @@ tree is self-contained and the parent theme's own `pub/static` output is
 redundant when nothing serves it — e.g. a Hyvä storefront that only touches
 `Magento/luma` via the fallback checkout doesn't need `Magento/blank` shipped.
 Leave it off unless you know the parent is never requested at runtime.
+
+`symlink` (static-deploy, off by default; also the `MAGEBUILD_SYMLINK` env var,
+and implied by `--preset hyva`) maps to magecommand's `--symlink=file`: pure-copy
+files — images, fonts, verbatim JS — become **relative symlinks** back to their
+`vendor/`/`app/`/`lib/web/` source instead of duplicated bytes; only derived
+files (LESS-compiled CSS, generated RequireJS, bundles) stay real. It's well
+suited to a magebuild artifact — the tarball ships `vendor` beside `pub/static`,
+so the relative links resolve after extraction to any path and survive an atomic
+`current → releases/N` swap. On a large multi-store the win is significant: the
+deploy stops writing, and `package` stops re-reading, the gigabytes of duplicated
+asset bytes, so the artifact shrinks several-fold (≈3.5× on one production
+multi-store tree: 2.6 GiB → 0.7 GiB). The one requirement is that the serve-time
+web server follows symlinks (nginx's default, `disable_symlinks off`); leave it
+off for a bare `pub/static` shipped without its source tree.
 
 ## Deployer integration
 
