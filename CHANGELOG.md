@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.6.0...magebuild-v0.7.0) (2026-08-25)
+
+
+### Features
+
+* apply the project's patches/ directory during composer-install ([#17](https://github.com/cresset-tools/magebuild/issues/17)) ([4bbbf8c](https://github.com/cresset-tools/magebuild/commit/4bbbf8c9439cb23464d920db9405f2ac322348d6))
+
 ## [0.6.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.5.0...magebuild-v0.6.0) (2026-07-24)
 
 
