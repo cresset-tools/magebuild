@@ -33,7 +33,8 @@ unix-archive = ".tar.gz"
 
 # Target triples we ship prebuilt binaries for. Linux gets both gnu and musl
 # (older distros and Alpine both work) plus arm64 (devcontainers, Graviton CI);
-# macOS gets both Apple Silicon and Intel; Windows is x64. Anything that
+# macOS is Apple Silicon only (GitHub's Intel macOS runners are too scarce to
+# release on); Windows is x64. Anything that
 # auto-downloads magebuild by triple name (a Deployer recipe, CI action) must
 # stay in sync with this list.
 targets = [
@@ -41,7 +42,6 @@ targets = [
     "x86_64-unknown-linux-musl",
     "aarch64-unknown-linux-gnu",
     "aarch64-apple-darwin",
-    "x86_64-apple-darwin",
     "x86_64-pc-windows-msvc",
 ]
 

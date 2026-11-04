@@ -121,10 +121,7 @@ final class Launcher
                 if ($isArm) {
                     return 'aarch64-apple-darwin';
                 }
-                if ($isX64) {
-                    return 'x86_64-apple-darwin';
-                }
-                throw new RuntimeException('no prebuilt ' . self::TOOL . " binary for macOS/$machine");
+                throw new RuntimeException('no prebuilt ' . self::TOOL . ' binary for Intel macOS (Apple Silicon only)');
             case 'Windows':
                 if ($isX64) {
                     return 'x86_64-pc-windows-msvc';
