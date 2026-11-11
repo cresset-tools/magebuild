@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.7.0...magebuild-v0.8.0) (2026-11-11)
+
+
+### Features
+
+* **magebuild:** db-status, a native setup:db:status ([429be55](https://github.com/cresset-tools/magebuild/commit/429be556d701c9d88d319fa7ca16ffc9d5e6bc2e))
+
+
+### Bug Fixes
+
+* **magebuild:** build aarch64-apple-darwin release binaries on macos-15 ([1fa8d5b](https://github.com/cresset-tools/magebuild/commit/1fa8d5b947916e6197c12be19273cea425d33a43))
+
 ## [0.7.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.6.0...magebuild-v0.7.0) (2026-11-11)
 
 
