@@ -12,10 +12,11 @@ description = "Build a Magento release as fast as possible — a parallel, DAG-o
 # Magento engines — git-pinned to cresset-tools/magequery (public repo), linked
 # in-process. di-compile: magecommand-engine (scan -> compute_outputs ->
 # write_generated); static-content-deploy: magecommand's static_deploy; Magento
-# discovery/index: magequery-core.
-magequery-core = { git = "https://github.com/cresset-tools/magequery", rev = "fcbbb96fcc5b116f105faa5932bcb6e255642af7" }
-magecommand-engine = { git = "https://github.com/cresset-tools/magequery", rev = "fcbbb96fcc5b116f105faa5932bcb6e255642af7" }
-magecommand = { git = "https://github.com/cresset-tools/magequery", rev = "fcbbb96fcc5b116f105faa5932bcb6e255642af7" }
+# discovery/index and `db-status`: magequery-core (its `db` feature adds the
+# pure-Rust mysql client).
+magequery-core = { git = "https://github.com/cresset-tools/magequery", rev = "7e9de82e1a4f3d5a13c5303c9880dfbd353fb9e8", features = ["db"] }
+magecommand-engine = { git = "https://github.com/cresset-tools/magequery", rev = "7e9de82e1a4f3d5a13c5303c9880dfbd353fb9e8" }
+magecommand = { git = "https://github.com/cresset-tools/magequery", rev = "7e9de82e1a4f3d5a13c5303c9880dfbd353fb9e8" }
 
 # Composer client — crates.io. composer-install (install-from-lock),
 # composer-autoload (optimized dump-autoload), composer-manifest (lockfile model),
