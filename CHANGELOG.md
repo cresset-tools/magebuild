@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.6.0...magebuild-v0.7.0) (2026-11-11)
+
+
+### Features
+
+* apply the project's patches/ directory during composer-install ([#17](https://github.com/cresset-tools/magebuild/issues/17)) ([4bbbf8c](https://github.com/cresset-tools/magebuild/commit/4bbbf8c9439cb23464d920db9405f2ac322348d6))
+
+
+### Bug Fixes
+
+* drop the x86_64-apple-darwin target everywhere ([14eaf84](https://github.com/cresset-tools/magebuild/commit/14eaf84d97c9af903201612ce994118bf02f02e2))
+
 ## [0.6.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.5.0...magebuild-v0.6.0) (2026-07-24)
 
 
