@@ -57,6 +57,7 @@ magebuild --artifact release.tar.zst   # also package (gzip/zstd chosen by exten
 magebuild plan                         # print the DAG + parallel schedule, run nothing
 magebuild node di-compile              # run one node and its dependencies
 magebuild --json                       # machine-readable output
+magebuild db-status                    # does the database need setup:upgrade?
 ```
 
 Common flags: `--jobs N`, `--only <ids>`, `--skip <ids>`, `--dry-run`,
@@ -179,6 +180,35 @@ task('magento:deploy:assets', function () {
 
 `--skip composer-install` when Deployer already installed the vendor tree; drop
 it to let magebuild install from `composer.lock` too.
+
+### Gating `setup:upgrade` with `db-status`
+
+`magebuild db-status` is a native `bin/magento setup:db:status`: it compares the
+declarative schema, the setup patches and the module versions against the
+database named in `app/etc/env.php`, in tens of milliseconds rather than a
+framework bootstrap. It uses the same exit codes as Magento: 0 when the
+database is up to date, 2 when an upgrade is required (including when the
+database is unreachable), 1 on an error such as a store that isn't installed.
+`--json` prints what differs.
+
+It runs on the deploy target, so put `magebuild` on that host's `PATH` (the
+curl installer above), then override the recipe's check in `deploy.php`:
+
+```php
+use Deployer\Exception\RunException;
+
+set('database_upgrade_needed', function () {
+    try {
+        run('magebuild db-status --root {{release_or_current_path}}');
+    } catch (RunException $e) {
+        if ($e->getExitCode() == 2) { // upgrade required
+            return true;
+        }
+        throw $e;
+    }
+    return false;
+});
+```
 
 ## How it relates to magequery
 

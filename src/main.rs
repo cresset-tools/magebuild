@@ -5,6 +5,7 @@
 //! with each step a linked in-process engine call where one exists.
 
 mod config;
+mod dbstatus;
 mod graph;
 mod json;
 mod preflight;
@@ -91,6 +92,10 @@ enum Command {
         /// The node id to build.
         id: String,
     },
+    /// Check whether the database needs `setup:upgrade` — a native
+    /// `bin/magento setup:db:status`. Exits 0 when up to date, 2 when an upgrade
+    /// is required, 1 on error.
+    DbStatus,
 }
 
 fn main() -> ExitCode {
@@ -106,6 +111,11 @@ fn main() -> ExitCode {
 fn run() -> Result<ExitCode> {
     let cli = Cli::parse();
     let root = cli.root.clone().unwrap_or_else(|| PathBuf::from("."));
+
+    // Not a build: no magebuild.toml, no graph.
+    if matches!(cli.command, Some(Command::DbStatus)) {
+        return dbstatus::run(&root, cli.json);
+    }
 
     let config_path = cli
         .config
