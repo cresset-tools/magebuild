@@ -18,13 +18,16 @@ magequery-core = { git = "https://github.com/cresset-tools/magequery", rev = "7e
 magecommand-engine = { git = "https://github.com/cresset-tools/magequery", rev = "7e9de82e1a4f3d5a13c5303c9880dfbd353fb9e8" }
 magecommand = { git = "https://github.com/cresset-tools/magequery", rev = "7e9de82e1a4f3d5a13c5303c9880dfbd353fb9e8" }
 
-# Composer client — crates.io. composer-install (install-from-lock),
-# composer-autoload (optimized dump-autoload), composer-manifest (lockfile model),
-# composer-patches (apply a project's `patches/` dir, like bigbridge/patcher).
-composer-install = "0.2"
-composer-autoload = "0.1"
-composer-manifest = "0.1"
-composer-patches = "0.1"
+# Composer client — git-pinned to cresset-tools/composer-client, so a fix
+# there is usable as soon as it lands, without waiting on a crates.io release.
+# composer-install (install-from-lock), composer-autoload (optimized
+# dump-autoload), composer-manifest (lockfile model), composer-patches
+# (cweagans-style patches), composer-installers (installer-paths).
+composer-install = { git = "https://github.com/cresset-tools/composer-client", rev = "ebd12177b17a34d95fad28a6b87e10ad14146518" }
+composer-autoload = { git = "https://github.com/cresset-tools/composer-client", rev = "ebd12177b17a34d95fad28a6b87e10ad14146518" }
+composer-manifest = { git = "https://github.com/cresset-tools/composer-client", rev = "ebd12177b17a34d95fad28a6b87e10ad14146518" }
+composer-patches = { git = "https://github.com/cresset-tools/composer-client", rev = "ebd12177b17a34d95fad28a6b87e10ad14146518" }
+composer-installers = { git = "https://github.com/cresset-tools/composer-client", rev = "ebd12177b17a34d95fad28a6b87e10ad14146518" }
 
 # CLI + orchestration.
 clap = { version = "4", features = ["derive"] }
@@ -54,3 +57,4 @@ strip = "symbols"
 [profile.dist]
 inherits = "release"
 lto = "thin"
+
