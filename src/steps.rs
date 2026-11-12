@@ -293,13 +293,6 @@ fn di_compile(root: &Path, fused: bool) -> Result<()> {
     let mut defs =
         magecommand_engine::definitions::Definitions::scan(&magento, &root, &generated_code);
     let out = magecommand_engine::build::compute_outputs_opts(&magento, &mut defs, &root, fused);
-    if !out.unresolved.is_empty() {
-        eprintln!(
-            "  note (di): {} class name(s) unresolvable via autoload maps (first: {})",
-            out.unresolved.len(),
-            out.unresolved.first().map(String::as_str).unwrap_or("")
-        );
-    }
     let written = magecommand_engine::metadata::write_generated(&root, &out.files)
         .context("writing generated/")?;
     eprintln!("  di-compile: wrote {written} generated/ file(s)");
