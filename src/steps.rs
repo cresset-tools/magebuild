@@ -166,277 +166,25 @@ fn composer_install(
     Ok(())
 }
 
-/// The root project's patch plan, from both ways a project declares patches —
-/// the same sources, in the same way, as `bougie composer install`:
-///
-/// - `composer.json` `extra.patches` and an external `patches-file`
-///   (cweagans/composer-patches), each entry a local path or an `http(s)://` URL;
-/// - the zero-config patches directory (`patches/`, or
-///   `extra.composer-patches.patches-dir`), where each `*.patch` file's target
-///   package + strip depth are inferred from its diff header paths. A file that
-///   `composer.json` already declares is left out of this scan: the declaration
-///   owns its target and depth.
-///
-/// Package-scoped patches are keyed by target (applied inside the package's
-/// install dir); one whose file ships inside a package that is not installed
-/// yet is deferred, and the installer applies it once that package is
-/// extracted. Root-scoped ones (a directory patch spanning several packages) apply once at
-/// the project root. Prior fingerprints come from `patches.lock.json`, so the
-/// plan is idempotent across runs. `extra.enable-patching: false` turns patching
-/// off. Returns `None` when there is nothing to apply and nothing to undo.
+/// The root project's patch plan, built by composer-patches exactly as
+/// `bougie composer install` builds it (`extra.patches`, `patches-file` and
+/// the patches directory; see [`composer_patches::build_plan`]), with
+/// magebuild's own policy on top: a patch that fails to apply fails the build,
+/// since a production build must never ship an unpatched tree, and
+/// `patches.lock.json` records what was applied in readable form. Remote
+/// patches are cached next to the dist cache. `None` when there is nothing to
+/// apply and nothing to undo.
 fn build_patch_plan(root: &Path, dist_cache: &Path) -> Result<Option<composer_patches::PatchPlan>> {
-    use composer_patches::{
-        DeferredPatch, FailureMode, MaterializedPatch, PatchPlan, PatchScope, RootPatch,
-    };
-    use std::collections::BTreeMap;
-
-    let cj_path = root.join("composer.json");
-    let composer_json: serde_json::Value = match std::fs::read(&cj_path) {
-        Ok(bytes) => serde_json::from_slice(&bytes)
-            .with_context(|| format!("parsing {}", cj_path.display()))?,
-        Err(_) => serde_json::Value::Null,
-    };
-    let applied = composer_patches::lock::read(root);
-    let enabled = composer_json
-        .pointer("/extra/enable-patching")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(true);
-    let patches = if enabled {
-        resolve_root_patches(root, &composer_json)?
-    } else {
-        Vec::new()
-    };
-    // Nothing declared: still hand over an empty plan when an earlier run
-    // applied patches, so the installer restores those packages to pristine.
-    if patches.is_empty() && applied.is_empty() {
-        return Ok(None);
-    }
-
-    let patch_cache = dist_cache.parent().unwrap_or(dist_cache).join("patches");
-    let mut by_target: BTreeMap<String, Vec<MaterializedPatch>> = BTreeMap::new();
-    let mut root_patches: Vec<RootPatch> = Vec::new();
-    let mut deferred: Vec<DeferredPatch> = Vec::new();
-    for p in &patches {
-        if matches!(p.scope, PatchScope::Package)
-            && let Some(d) = defer_vendor_shipped(root, p)
-        {
-            deferred.push(d);
-            continue;
-        }
-        let mp = materialize_patch(root, &patch_cache, p)?;
-        match &p.scope {
-            PatchScope::Root { packages } => root_patches.push(RootPatch {
-                patch: mp,
-                packages: packages.clone(),
-            }),
-            PatchScope::Package => by_target.entry(p.target.clone()).or_default().push(mp),
-        }
-    }
-
-    Ok(Some(PatchPlan {
-        patches: by_target,
-        root_patches,
-        deferred,
-        // Prior state → the installer skips packages already at the desired
-        // fingerprint (idempotent), re-extracts+re-applies ones whose patch set
-        // changed.
-        applied,
-        // Fail the build on a patch that doesn't apply — never silently ship an
-        // unpatched tree (production's patcher aborts too).
-        failure_mode: FailureMode::Abort,
-        skip_report: composer_json
-            .pointer("/extra/composer-patches-skip-reporting")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false),
+    let opts = composer_patches::PlanOptions {
+        exit_on_failure: Some(true),
         write_lock: true,
-    }))
-}
-
-/// Every root patch, unresolved: `extra.patches` / `patches-file` declarations,
-/// then the patches directory minus the files those declare, then exact
-/// duplicates (same target, source and description) dropped.
-fn resolve_root_patches(
-    root: &Path,
-    composer_json: &serde_json::Value,
-) -> Result<Vec<composer_patches::Patch>> {
-    use composer_patches::PatchSource;
-
-    let mut patches = if composer_json.is_null() {
-        Vec::new()
-    } else {
-        composer_patches::resolve_root(composer_json, root)
-            .map_err(|e| anyhow::anyhow!("resolving composer.json patches: {e:#}"))?
+        cache_dir: Some(dist_cache.parent().unwrap_or(dist_cache).join("patches")),
+        ..composer_patches::PlanOptions::default()
     };
-
-    let dir_name = composer_json
-        .pointer("/extra/composer-patches/patches-dir")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("patches");
-    let patches_dir = root.join(dir_name);
-    if patches_dir.is_dir() {
-        let declared: Vec<PathBuf> = patches
-            .iter()
-            .filter_map(|p| match &p.source {
-                PatchSource::Local(rel) => Some(absolute_in(root, rel)),
-                PatchSource::Remote(_) => None,
-            })
-            .collect();
-        // `resolve_patches_dir` infers each patch's target by matching its diff
-        // paths against the installed packages, so it needs the package→dir map.
-        let install_paths = lock_install_paths(root, composer_json)?;
-        let found = composer_patches::resolve_patches_dir(&patches_dir, &install_paths, &declared)
-            .map_err(|e| anyhow::anyhow!("resolving {}: {e:#}", patches_dir.display()))?;
-        patches.extend(found);
-    }
-
-    let mut seen = std::collections::HashSet::new();
-    patches.retain(|p| {
-        let source = match &p.source {
-            PatchSource::Local(path) => path.to_string_lossy().into_owned(),
-            PatchSource::Remote(url) => url.clone(),
-        };
-        seen.insert((p.target.clone(), source, p.description.clone()))
-    });
-    Ok(patches)
-}
-
-/// A package-scoped local patch whose file is missing and lies inside
-/// `vendor/`: it ships in a package that is not installed yet, so the installer
-/// reads and applies it after extracting that package. `None` for anything
-/// else, including a missing file outside `vendor/`, which stays an error at
-/// materialize time so a mistyped project patch fails before the install.
-fn defer_vendor_shipped(
-    root: &Path,
-    p: &composer_patches::Patch,
-) -> Option<composer_patches::DeferredPatch> {
-    let composer_patches::PatchSource::Local(rel) = &p.source else {
-        return None;
-    };
-    let abs = absolute_in(root, rel);
-    if abs.exists() || !abs.starts_with(root.join("vendor")) {
-        return None;
-    }
-    Some(composer_patches::DeferredPatch {
-        target: p.target.clone(),
-        description: p.description.clone(),
-        origin: rel.to_string_lossy().into_owned(),
-        local_path: abs,
-        depth: p.depth,
-        declared_sha256: p.sha256.clone(),
-    })
-}
-
-fn absolute_in(root: &Path, p: &Path) -> PathBuf {
-    if p.is_absolute() {
-        p.to_path_buf()
-    } else {
-        root.join(p)
-    }
-}
-
-/// Read one patch's bytes — a project file, or a URL downloaded into
-/// `cache` — and check them against a declared `sha256`.
-fn materialize_patch(
-    root: &Path,
-    cache: &Path,
-    p: &composer_patches::Patch,
-) -> Result<composer_patches::MaterializedPatch> {
-    use composer_patches::PatchSource;
-
-    let (local_path, origin) = match &p.source {
-        PatchSource::Local(rel) => (absolute_in(root, rel), rel.to_string_lossy().into_owned()),
-        PatchSource::Remote(url) => (
-            download_patch(cache, url, p.sha256.as_deref())?,
-            url.clone(),
-        ),
-    };
-    let bytes = std::fs::read(&local_path).with_context(|| {
-        format!(
-            "reading patch `{}` for `{}` ({})",
-            p.description,
-            p.target,
-            local_path.display()
-        )
-    })?;
-    let sha = composer_patches::content_sha256(&bytes);
-    if let Some(declared) = &p.sha256
-        && !declared.eq_ignore_ascii_case(&sha)
-    {
-        if matches!(p.source, PatchSource::Remote(_)) {
-            // Don't let a bad download sit in the cache under the declared sha.
-            let _ = std::fs::remove_file(&local_path);
-        }
-        anyhow::bail!(
-            "patch `{}` for `{}`: sha256 mismatch (declared {declared}, actual {sha})",
-            p.description,
-            p.target
-        );
-    }
-    Ok(composer_patches::MaterializedPatch {
-        description: p.description.clone(),
-        origin,
-        local_path,
-        content_sha256: sha,
-        depth: p.depth,
-    })
-}
-
-/// Download a remote patch into `cache`, keyed like bougie's patch cache: the
-/// declared sha256 when there is one (content-addressed), else a hash of the
-/// URL. The caller verifies the declared sha256.
-fn download_patch(cache: &Path, url: &str, declared_sha: Option<&str>) -> Result<PathBuf> {
-    use composer_install::Fetcher as _;
-
-    let key = declared_sha.map_or_else(
-        || composer_patches::content_sha256(url.as_bytes()),
-        str::to_ascii_lowercase,
-    );
-    let dest = cache.join(format!("{key}.patch"));
-    let partial = cache.join(".partial");
-    std::fs::create_dir_all(&partial)
-        .with_context(|| format!("creating patch cache {}", cache.display()))?;
     let fetcher = composer_install::ReqwestFetcher::new()
         .map_err(|e| anyhow::anyhow!("building HTTP fetcher: {e:#}"))?;
-    fetcher
-        .fetch(&composer_install::FetchSpec {
-            url,
-            sha1: "",
-            dest: &dest,
-            partial_dir: &partial,
-            auth_header: None,
-            auth_header_name: None,
-        })
-        .map_err(|e| anyhow::anyhow!("downloading patch {url}: {e:#}"))?;
-    Ok(dest)
-}
-
-/// The package→install-dir map for [`build_patch_plan`]: every package in
-/// `composer.lock` (runtime + dev) at the path the installer puts it, which
-/// `extra.installer-paths` and the package type can move out of
-/// `vendor/<name>`.
-fn lock_install_paths(
-    root: &Path,
-    composer_json: &serde_json::Value,
-) -> Result<Vec<(String, String)>> {
-    let lock_path = root.join("composer.lock");
-    let bytes =
-        std::fs::read(&lock_path).with_context(|| format!("reading {}", lock_path.display()))?;
-    let lock: serde_json::Value = serde_json::from_slice(&bytes)
-        .with_context(|| format!("parsing {}", lock_path.display()))?;
-    let installer_paths = composer_installers::InstallerPaths::parse(composer_json);
-    let mut out = Vec::new();
-    for key in ["packages", "packages-dev"] {
-        if let Some(arr) = lock.get(key).and_then(|v| v.as_array()) {
-            for pkg in arr {
-                if let Some(name) = pkg.get("name").and_then(|n| n.as_str()) {
-                    let ptype = pkg.get("type").and_then(|t| t.as_str());
-                    let rel = composer_installers::install_path(name, ptype, &installer_paths);
-                    out.push((name.to_string(), rel));
-                }
-            }
-        }
-    }
-    Ok(out)
+    composer_patches::build_plan(root, &opts, &fetcher)
+        .map_err(|e| anyhow::anyhow!("building the patch plan: {e:#}"))
 }
 
 /// `setup:di:compile`, in-process — the exact sequence the `magecommand` CLI
@@ -944,130 +692,20 @@ mod tests {
     }
 
     #[test]
-    fn patch_plan_unions_composer_json_and_patches_dir() {
+    fn patch_plan_aborts_on_failure_and_writes_the_readable_lock() {
+        // The plan's sources and parsing are composer-patches' (and tested
+        // there); magebuild only sets its policy on top.
         let root = patch_project(
-            "union",
-            r#"{"extra":{"patches":{"acme/foo":{"Declared fix":"patches/foo.patch"}}}}"#,
-            &[
-                ("patches/foo.patch", &diff_for("acme/foo")),
-                ("patches/bar.patch", &diff_for("acme/bar")),
-            ],
-        );
-        let cache = root.join("cache/composer-dist");
-        let plan = build_patch_plan(&root, &cache).unwrap().expect("a plan");
-
-        // The declared file appears once, under its declaration; the other one
-        // is found by the directory scan with its target inferred.
-        let foo = &plan.patches["acme/foo"];
-        assert_eq!(foo.len(), 1);
-        assert_eq!(foo[0].description, "Declared fix");
-        assert_eq!(plan.patches["acme/bar"].len(), 1);
-        assert_eq!(plan.patches.len(), 2);
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn patch_plan_reads_patches_file_and_custom_dir() {
-        let root = patch_project(
-            "file-dir",
-            r#"{"extra":{"patches-file":"my-patches.json","composer-patches":{"patches-dir":"fixes"}}}"#,
-            &[
-                (
-                    "my-patches.json",
-                    r#"{"patches":{"acme/foo":{"From patches-file":"fixes/foo.patch"}}}"#,
-                ),
-                ("fixes/foo.patch", &diff_for("acme/foo")),
-                ("fixes/bar.patch", &diff_for("acme/bar")),
-                // Not the configured directory: ignored.
-                ("patches/stray.patch", &diff_for("acme/bar")),
-            ],
+            "policy",
+            r#"{"extra":{"patches":{"acme/foo":["patches/foo.patch"]}}}"#,
+            &[("patches/foo.patch", &diff_for("acme/foo"))],
         );
         let plan = build_patch_plan(&root, &root.join("cache/composer-dist"))
             .unwrap()
             .expect("a plan");
-        assert_eq!(plan.patches["acme/foo"][0].description, "From patches-file");
-        assert_eq!(plan.patches["acme/bar"].len(), 1);
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn patch_plan_honours_enable_patching_and_sha256() {
-        let off = patch_project(
-            "off",
-            r#"{"extra":{"enable-patching":false,"patches":{"acme/foo":{"x":"patches/foo.patch"}}}}"#,
-            &[("patches/foo.patch", &diff_for("acme/foo"))],
-        );
-        assert!(build_patch_plan(&off, &off.join("c/d")).unwrap().is_none());
-        let _ = std::fs::remove_dir_all(&off);
-
-        let bad = patch_project(
-            "sha",
-            r#"{"extra":{"patches":{"acme/foo":[{"description":"x","url":"patches/foo.patch","sha256":"00"}]}}}"#,
-            &[("patches/foo.patch", &diff_for("acme/foo"))],
-        );
-        let err = build_patch_plan(&bad, &bad.join("c/d")).unwrap_err();
-        assert!(format!("{err:#}").contains("sha256 mismatch"), "{err:#}");
-        let _ = std::fs::remove_dir_all(&bad);
-    }
-
-    #[test]
-    fn patch_plan_accepts_bare_list_form() {
-        // cweagans' description-less list: `"pkg": ["path", …]`.
-        let root = patch_project(
-            "bare-list",
-            r#"{"extra":{"patches":{"acme/foo":["patches/foo.patch"]}}}"#,
-            &[("patches/foo.patch", &diff_for("acme/foo"))],
-        );
-        let cache = root.join("cache/composer-dist");
-        let plan = build_patch_plan(&root, &cache).unwrap().expect("a plan");
-        let foo = &plan.patches["acme/foo"];
-        assert_eq!(foo.len(), 1);
-        assert_eq!(foo[0].description, "patches/foo.patch");
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn patch_plan_defers_vendor_shipped_patch() {
-        // The patch file ships in acme/bar, which is not installed yet: it is
-        // deferred to the installer instead of failing the plan.
-        let root = patch_project(
-            "deferred",
-            r#"{"extra":{"patches":{"acme/foo":{"Vendor fix":"vendor/acme/bar/fix.patch"}}}}"#,
-            &[],
-        );
-        let cache = root.join("cache/composer-dist");
-        let plan = build_patch_plan(&root, &cache).unwrap().expect("a plan");
-        assert!(plan.patches.is_empty(), "must not be read before install");
-        assert_eq!(plan.deferred.len(), 1);
-        assert_eq!(plan.deferred[0].target, "acme/foo");
-        assert_eq!(plan.deferred[0].origin, "vendor/acme/bar/fix.patch");
-        let _ = std::fs::remove_dir_all(&root);
-
-        // A missing patch outside vendor/ is a mistake, and still an error.
-        let root = patch_project(
-            "missing",
-            r#"{"extra":{"patches":{"acme/foo":{"Typo":"patches/typo.patch"}}}}"#,
-            &[],
-        );
-        assert!(build_patch_plan(&root, &root.join("cache/composer-dist")).is_err());
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn patch_plan_infers_target_under_installer_paths() {
-        // installer-paths moves acme/foo to app/code/Acme/Foo; a patches/ file
-        // touching that path must still be routed to acme/foo.
-        let root = patch_project(
-            "installer-paths",
-            r#"{"extra":{"installer-paths":{"app/code/Acme/Foo":["acme/foo"]}}}"#,
-            &[(
-                "patches/foo.patch",
-                "--- a/app/code/Acme/Foo/src/A.php\n+++ b/app/code/Acme/Foo/src/A.php\n@@ -1 +1 @@\n-old\n+new\n",
-            )],
-        );
-        let cache = root.join("cache/composer-dist");
-        let plan = build_patch_plan(&root, &cache).unwrap().expect("a plan");
         assert_eq!(plan.patches["acme/foo"].len(), 1);
+        assert_eq!(plan.failure_mode, composer_patches::FailureMode::Abort);
+        assert!(plan.write_lock);
         let _ = std::fs::remove_dir_all(&root);
     }
 
