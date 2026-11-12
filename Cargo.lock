@@ -487,7 +487,7 @@ dependencies = [
 [[package]]
 name = "composer-autoload"
 version = "0.1.0"
-source = "git+https://github.com/cresset-tools/composer-client?rev=ebd12177b17a34d95fad28a6b87e10ad14146518#ebd12177b17a34d95fad28a6b87e10ad14146518"
+source = "git+https://github.com/cresset-tools/composer-client?rev=7d14eab69a9f82ad755a2ab6ad8a554860ad878a#7d14eab69a9f82ad755a2ab6ad8a554860ad878a"
 dependencies = [
  "composer-installers",
  "composer-php-json",
@@ -505,7 +505,7 @@ dependencies = [
 [[package]]
 name = "composer-install"
 version = "0.2.0"
-source = "git+https://github.com/cresset-tools/composer-client?rev=ebd12177b17a34d95fad28a6b87e10ad14146518#ebd12177b17a34d95fad28a6b87e10ad14146518"
+source = "git+https://github.com/cresset-tools/composer-client?rev=7d14eab69a9f82ad755a2ab6ad8a554860ad878a#7d14eab69a9f82ad755a2ab6ad8a554860ad878a"
 dependencies = [
  "composer-auth",
  "composer-autoload",
@@ -526,7 +526,7 @@ dependencies = [
 [[package]]
 name = "composer-installers"
 version = "0.1.0"
-source = "git+https://github.com/cresset-tools/composer-client?rev=ebd12177b17a34d95fad28a6b87e10ad14146518#ebd12177b17a34d95fad28a6b87e10ad14146518"
+source = "git+https://github.com/cresset-tools/composer-client?rev=7d14eab69a9f82ad755a2ab6ad8a554860ad878a#7d14eab69a9f82ad755a2ab6ad8a554860ad878a"
 dependencies = [
  "eyre",
  "serde_json",
@@ -535,7 +535,7 @@ dependencies = [
 [[package]]
 name = "composer-manifest"
 version = "0.1.0"
-source = "git+https://github.com/cresset-tools/composer-client?rev=ebd12177b17a34d95fad28a6b87e10ad14146518#ebd12177b17a34d95fad28a6b87e10ad14146518"
+source = "git+https://github.com/cresset-tools/composer-client?rev=7d14eab69a9f82ad755a2ab6ad8a554860ad878a#7d14eab69a9f82ad755a2ab6ad8a554860ad878a"
 dependencies = [
  "composer-php-json",
  "composer-semver",
@@ -550,8 +550,9 @@ dependencies = [
 [[package]]
 name = "composer-patches"
 version = "0.1.0"
-source = "git+https://github.com/cresset-tools/composer-client?rev=ebd12177b17a34d95fad28a6b87e10ad14146518#ebd12177b17a34d95fad28a6b87e10ad14146518"
+source = "git+https://github.com/cresset-tools/composer-client?rev=7d14eab69a9f82ad755a2ab6ad8a554860ad878a#7d14eab69a9f82ad755a2ab6ad8a554860ad878a"
 dependencies = [
+ "composer-installers",
  "eyre",
  "flickzeug",
  "serde",
@@ -1730,7 +1731,6 @@ dependencies = [
  "clap",
  "composer-autoload",
  "composer-install",
- "composer-installers",
  "composer-manifest",
  "composer-patches",
  "flate2",
