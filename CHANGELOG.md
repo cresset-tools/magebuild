@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.9.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.8.0...magebuild-v0.9.0) (2026-11-13)
+
+
+### Features
+
+* **magebuild:** install tar dists and git-source packages ([604b551](https://github.com/cresset-tools/magebuild/commit/604b551bced582c0d5c64319b80a2702af0c5516))
+
+
+### Bug Fixes
+
+* **magebuild:** apply composer.json patches, not only patches/ ([e8b3a48](https://github.com/cresset-tools/magebuild/commit/e8b3a48e3d202cc4cb698944d9db14bb325d3e53))
+* **magecommand:** stop printing the unresolvable-class note on di compile ([5b62a5a](https://github.com/cresset-tools/magebuild/commit/5b62a5a2e2307bfbf214ef1d6b4f5278d43c22f4))
+
 ## [0.8.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.7.0...magebuild-v0.8.0) (2026-11-11)
 
 
