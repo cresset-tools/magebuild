@@ -1737,12 +1737,14 @@ dependencies = [
  "composer-patches",
  "flate2",
  "gzp",
+ "libc",
  "magecommand",
  "magecommand-engine",
  "magequery-core",
  "rayon",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tar",
  "toml",
  "tracing",
@@ -1752,7 +1754,7 @@ dependencies = [
 [[package]]
 name = "magecommand"
 version = "0.25.1"
-source = "git+https://github.com/cresset-tools/magequery?rev=7e9de82e1a4f3d5a13c5303c9880dfbd353fb9e8#7e9de82e1a4f3d5a13c5303c9880dfbd353fb9e8"
+source = "git+https://github.com/cresset-tools/magequery?rev=01bbd27564ade07fa085852d7156b62214f7e253#01bbd27564ade07fa085852d7156b62214f7e253"
 dependencies = [
  "anstyle",
  "anyhow",
@@ -1780,7 +1782,7 @@ dependencies = [
 [[package]]
 name = "magecommand-engine"
 version = "0.25.1"
-source = "git+https://github.com/cresset-tools/magequery?rev=7e9de82e1a4f3d5a13c5303c9880dfbd353fb9e8#7e9de82e1a4f3d5a13c5303c9880dfbd353fb9e8"
+source = "git+https://github.com/cresset-tools/magequery?rev=01bbd27564ade07fa085852d7156b62214f7e253#01bbd27564ade07fa085852d7156b62214f7e253"
 dependencies = [
  "blake3",
  "magecommand-php",
@@ -1795,7 +1797,7 @@ dependencies = [
 [[package]]
 name = "magecommand-less"
 version = "0.25.1"
-source = "git+https://github.com/cresset-tools/magequery?rev=7e9de82e1a4f3d5a13c5303c9880dfbd353fb9e8#7e9de82e1a4f3d5a13c5303c9880dfbd353fb9e8"
+source = "git+https://github.com/cresset-tools/magequery?rev=01bbd27564ade07fa085852d7156b62214f7e253#01bbd27564ade07fa085852d7156b62214f7e253"
 dependencies = [
  "cssparser 0.37.0",
  "fancy-regex",
@@ -1807,7 +1809,7 @@ dependencies = [
 [[package]]
 name = "magecommand-php"
 version = "0.25.1"
-source = "git+https://github.com/cresset-tools/magequery?rev=7e9de82e1a4f3d5a13c5303c9880dfbd353fb9e8#7e9de82e1a4f3d5a13c5303c9880dfbd353fb9e8"
+source = "git+https://github.com/cresset-tools/magequery?rev=01bbd27564ade07fa085852d7156b62214f7e253#01bbd27564ade07fa085852d7156b62214f7e253"
 dependencies = [
  "memchr",
 ]
@@ -1815,7 +1817,7 @@ dependencies = [
 [[package]]
 name = "magequery-core"
 version = "0.25.1"
-source = "git+https://github.com/cresset-tools/magequery?rev=7e9de82e1a4f3d5a13c5303c9880dfbd353fb9e8#7e9de82e1a4f3d5a13c5303c9880dfbd353fb9e8"
+source = "git+https://github.com/cresset-tools/magequery?rev=01bbd27564ade07fa085852d7156b62214f7e253#01bbd27564ade07fa085852d7156b62214f7e253"
 dependencies = [
  "aes",
  "base64 0.22.1",

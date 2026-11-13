@@ -14,9 +14,9 @@ description = "Build a Magento release as fast as possible — a parallel, DAG-o
 # write_generated); static-content-deploy: magecommand's static_deploy; Magento
 # discovery/index and `db-status`: magequery-core (its `db` feature adds the
 # pure-Rust mysql client).
-magequery-core = { git = "https://github.com/cresset-tools/magequery", rev = "7e9de82e1a4f3d5a13c5303c9880dfbd353fb9e8", features = ["db"] }
-magecommand-engine = { git = "https://github.com/cresset-tools/magequery", rev = "7e9de82e1a4f3d5a13c5303c9880dfbd353fb9e8" }
-magecommand = { git = "https://github.com/cresset-tools/magequery", rev = "7e9de82e1a4f3d5a13c5303c9880dfbd353fb9e8" }
+magequery-core = { git = "https://github.com/cresset-tools/magequery", rev = "01bbd27564ade07fa085852d7156b62214f7e253", features = ["db"] }
+magecommand-engine = { git = "https://github.com/cresset-tools/magequery", rev = "01bbd27564ade07fa085852d7156b62214f7e253" }
+magecommand = { git = "https://github.com/cresset-tools/magequery", rev = "01bbd27564ade07fa085852d7156b62214f7e253" }
 
 # Composer client — git-pinned to cresset-tools/composer-client, so a fix
 # there is usable as soon as it lands, without waiting on a crates.io release.
@@ -44,6 +44,9 @@ toml = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
+# deploy agent: flock, kill, getuid; and the agent binary's hash.
+libc = "0.2"
+sha2 = "0.10"
 tracing = "0.1"
 
 [profile.release]

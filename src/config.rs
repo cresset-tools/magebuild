@@ -102,6 +102,8 @@ pub struct FileConfig {
     pub build: BuildSection,
     #[serde(default)]
     pub nodes: BTreeMap<String, NodeSpec>,
+    /// `[deploy]` — how `magebuild deploy` ships a built artifact to a host.
+    pub deploy: Option<crate::deploy::config::DeploySection>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]

@@ -6,6 +6,7 @@
 
 mod config;
 mod dbstatus;
+mod deploy;
 mod graph;
 mod json;
 mod preflight;
@@ -96,6 +97,28 @@ enum Command {
     /// `bin/magento setup:db:status`. Exits 0 when up to date, 2 when an upgrade
     /// is required, 1 on error.
     DbStatus,
+    /// Ship a built artifact to the `[deploy]` host: one ssh session, a small
+    /// agent on the host (uploaded only when that build is not there yet)
+    /// doing the release, shared links, upgrade check, swap and cleanup.
+    Deploy {
+        /// The artifact to deploy (.tar.gz, .tar.zst or .tar).
+        #[arg(long = "from")]
+        from: PathBuf,
+        /// The agent binary for the host, a static Linux build (default: this
+        /// executable).
+        #[arg(long)]
+        agent: Option<PathBuf>,
+        /// Override `[deploy] host`.
+        #[arg(long)]
+        host: Option<String>,
+        /// The ssh command, split on whitespace.
+        #[arg(long, default_value = "ssh")]
+        ssh: String,
+    },
+    /// The host side of `deploy`, started by it over ssh. Speaks a JSON-lines
+    /// protocol on stdin/stdout.
+    #[command(hide = true)]
+    Agent,
 }
 
 fn main() -> ExitCode {
@@ -116,12 +139,37 @@ fn run() -> Result<ExitCode> {
     if matches!(cli.command, Some(Command::DbStatus)) {
         return dbstatus::run(&root, cli.json);
     }
+    if matches!(cli.command, Some(Command::Agent)) {
+        return Ok(deploy::agent::run());
+    }
 
     let config_path = cli
         .config
         .clone()
         .unwrap_or_else(|| root.join("magebuild.toml"));
     let file = FileConfig::load(&config_path)?;
+
+    if let Some(Command::Deploy {
+        from,
+        agent,
+        host,
+        ssh,
+    }) = &cli.command
+    {
+        let section = file
+            .deploy
+            .clone()
+            .with_context(|| format!("{} has no [deploy] section", config_path.display()))?;
+        return deploy::runner::run(
+            section,
+            deploy::runner::Options {
+                artifact: from.clone(),
+                agent: agent.clone(),
+                host: host.clone(),
+                ssh: ssh.clone(),
+            },
+        );
+    }
 
     let opts = BuildOptions {
         artifact: cli.artifact.clone(),
