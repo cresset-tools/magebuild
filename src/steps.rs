@@ -131,11 +131,11 @@ fn composer_install(
 
     let fetcher = composer_install::ReqwestFetcher::new()
         .map_err(|e| anyhow::anyhow!("building HTTP fetcher: {e:#}"))?;
-    let env = composer_install::InstallEnv {
-        fetcher: &fetcher,
-        progress: &composer_install::NoProgress,
-        cache_root: &cache,
-    };
+    // Packages the lock pins to a git source (no dist) clone through the
+    // system git, with bare mirrors cached beside the dists.
+    let git = composer_install::GitSourceFetcher::new(cache.join("vcs"));
+    let env = composer_install::InstallEnv::new(&fetcher, &composer_install::NoProgress, &cache)
+        .with_source_fetcher(&git);
     // Build the root patch plan and hand it to the installer. The in-process
     // installer skips composer plugins, so without this a patch-dependent project
     // (e.g. Hyvä checkout modules whose CSS a `Tailwind-4.patch` makes
