@@ -58,6 +58,7 @@ magebuild plan                         # print the DAG + parallel schedule, run 
 magebuild node di-compile              # run one node and its dependencies
 magebuild --json                       # machine-readable output
 magebuild db-status                    # does the database need setup:upgrade?
+magebuild deploy --from release.tar.gz # ship a built release to the [deploy] host
 ```
 
 Common flags: `--jobs N`, `--only <ids>`, `--skip <ids>`, `--dry-run`,
@@ -209,6 +210,59 @@ set('database_upgrade_needed', function () {
     return false;
 });
 ```
+
+## Deploying (`magebuild deploy`)
+
+`magebuild deploy` replaces Deployer's deploy stage. It opens one ssh session
+to the host and runs a small agent there: the same magebuild binary, uploaded
+to `~/.cache/magebuild/agent-<sha256>` only when that build is not there yet.
+The agent does the release work that a Deployer recipe does one remote command
+at a time, so a deploy costs one round trip instead of about a hundred:
+
+1. takes a lock (`flock` on `.dep/magebuild.lock`, released however the agent
+   exits) and creates `releases/<N>`;
+2. unpacks the artifact as it streams in;
+3. links `shared/` into the release, derives `app/etc/env.php` from a template
+   with a fresh cache `id_prefix` per release, and sets writable dirs;
+4. checks for a database upgrade natively (`db-status`) and for a config import
+   (`bin/magento app:config:status`);
+5. pauses cron, runs the import or upgrade only when needed (maintenance mode on
+   the live release meanwhile), then swaps `current` atomically;
+6. resets opcache over FastCGI, deletes the previous release's cache keys,
+   resumes cron, and sets old releases aside for the next deploy to delete
+   while it uploads.
+
+The layout is Deployer's (`releases/<N>`, `shared/`, a relative `current`,
+`.dep/latest_release`, `.dep/releases_log`), so a Deployer recipe still works
+on the same host as a fallback.
+
+```toml
+[deploy]
+host = "magento@shop.example.com"
+path = "/var/www/shop"
+php = "/usr/bin/php8.4"
+shared_files = ["var/.maintenance.ip"]          # env.php is derived, below
+links = { "auth.json" = "shared/auth.json" }    # linked, never touched
+keep_releases = 5
+
+[deploy.env_php]
+source = "shared/app/etc/env.php"               # rolls cache/frontend/*/id_prefix to r<N>_
+
+[deploy.cron]                                   # default: backend = "none"
+backend = "systemd"
+stop = ["magento-cron.timer", "magento-cron.service"]
+start = ["magento-cron.timer"]
+
+[deploy.opcache]
+fastcgi = "127.0.0.1:9000"                      # or a socket path
+tmp_dir = "/var/www/tmp"                        # a dir php-fpm sees at the same path
+```
+
+`shared_dirs` and `writable_dirs` default to Deployer's magento2 recipe.
+`upgrade = "check"` refuses to swap when an upgrade or import is needed instead
+of running it. `--agent <path>` picks the binary to run on the host (a static
+Linux build; by default the running magebuild), `--host` overrides the host,
+and `--ssh` the ssh command.
 
 ## How it relates to magequery
 
