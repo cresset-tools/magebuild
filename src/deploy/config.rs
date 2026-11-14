@@ -184,6 +184,7 @@ impl DeploySection {
         Ok(())
     }
 
+    #[cfg(unix)]
     pub fn writable_mode_bits(&self) -> u32 {
         u32::from_str_radix(self.writable_mode.trim_start_matches("0o"), 8).unwrap_or(0o755)
     }

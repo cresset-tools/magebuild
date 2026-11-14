@@ -140,7 +140,10 @@ fn run() -> Result<ExitCode> {
         return dbstatus::run(&root, cli.json);
     }
     if matches!(cli.command, Some(Command::Agent)) {
+        #[cfg(unix)]
         return Ok(deploy::agent::run());
+        #[cfg(not(unix))]
+        anyhow::bail!("the deploy agent runs on Unix hosts only");
     }
 
     let config_path = cli
