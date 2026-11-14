@@ -1,6 +1,7 @@
 //! `magebuild deploy`: the CI side. Opens one ssh session, makes sure the
 //! host has this exact agent build (uploading it only when missing), sends the
-//! plan, streams the artifact and prints the agent's progress.
+//! plan and the artifact's manifest, streams what the host lacks and prints
+//! the agent's progress.
 
 use std::fs::File;
 use std::io::{BufReader, Read, Write};
@@ -12,7 +13,8 @@ use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
 
 use super::config::DeploySection;
-use super::protocol::{self, ArtifactFormat, Event, PROTOCOL, Plan};
+use super::manifest;
+use super::protocol::{self, ArtifactFormat, Data, Event, Need, PROTOCOL, Plan};
 
 pub struct Options {
     pub artifact: PathBuf,
@@ -47,6 +49,20 @@ pub fn run(mut deploy: DeploySection, opts: Options) -> Result<ExitCode> {
     let artifact_len = std::fs::metadata(&opts.artifact)
         .with_context(|| format!("reading {}", opts.artifact.display()))?
         .len();
+    let t = Instant::now();
+    let entries = manifest::from_artifact(&opts.artifact, format)?;
+    let manifest_bytes = entries.as_deref().map(manifest::encode).transpose()?;
+    match (&entries, &manifest_bytes) {
+        (Some(e), Some(b)) => eprintln!(
+            "  manifest: {} entries, {:.1} MB, in {:.1}s",
+            e.len(),
+            b.len() as f64 / 1e6,
+            t.elapsed().as_secs_f64()
+        ),
+        _ => {
+            eprintln!("  manifest: the artifact has entries it cannot describe; sending all of it")
+        }
+    }
 
     let mut ssh = opts.ssh.split_whitespace();
     let program = ssh.next().context("--ssh is empty")?;
@@ -110,24 +126,58 @@ pub fn run(mut deploy: DeploySection, opts: Options) -> Result<ExitCode> {
             &Plan {
                 protocol: PROTOCOL,
                 deploy,
-                artifact_len,
-                artifact_format: format,
+                manifest_len: manifest_bytes.as_ref().map(|b| b.len() as u64),
                 user: env_or(&["GITHUB_ACTOR", "USER"], "magebuild"),
                 target: env_or(&["GITHUB_SHA"], "HEAD"),
             },
         )?;
+        if let Some(b) = &manifest_bytes {
+            to_agent.write_all(b)?;
+            to_agent.flush()?;
+        }
 
         let mut release = String::new();
         loop {
             let ev: Event = protocol::recv(&mut from_agent)?
                 .context("the agent exited without reporting a result")?;
             match ev {
-                Event::Ready { release: r } => {
-                    eprintln!(
-                        "  release {r}: streaming {:.1} MB",
-                        artifact_len as f64 / 1e6
-                    );
-                    stream(&opts.artifact, artifact_len, &mut to_agent)?;
+                Event::Ready { release: r, need } => {
+                    match need {
+                        Need::All => {
+                            eprintln!(
+                                "  release {r}: streaming {:.1} MB",
+                                artifact_len as f64 / 1e6
+                            );
+                            protocol::send(
+                                &mut to_agent,
+                                &Data {
+                                    len: artifact_len,
+                                    format,
+                                },
+                            )?;
+                            stream(&opts.artifact, artifact_len, &mut to_agent)?;
+                        }
+                        Need::Files { indices } => {
+                            let t = Instant::now();
+                            let tar = manifest::filtered(&opts.artifact, format, &indices)?;
+                            eprintln!(
+                                "  release {r}: sending {} of {} files, {:.1} MB (packed in {:.1}s)",
+                                indices.len(),
+                                entries.as_ref().map_or(0, |e| e.len()),
+                                tar.len() as f64 / 1e6,
+                                t.elapsed().as_secs_f64()
+                            );
+                            protocol::send(
+                                &mut to_agent,
+                                &Data {
+                                    len: tar.len() as u64,
+                                    format: ArtifactFormat::TarZst,
+                                },
+                            )?;
+                            to_agent.write_all(&tar)?;
+                            to_agent.flush()?;
+                        }
+                    }
                     release = r;
                 }
                 Event::Step { name, ms, detail } => match detail {

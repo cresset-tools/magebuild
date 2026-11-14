@@ -260,7 +260,8 @@ at a time, so a deploy costs one round trip instead of about a hundred:
 
 1. takes a lock (`flock` on `.dep/magebuild.lock`, released however the agent
    exits) and creates `releases/<N>`;
-2. unpacks the artifact as it streams in;
+2. reuses every file the live release already has and unpacks only the rest
+   as it streams in (see "Sending only what changed" below);
 3. links `shared/` into the release, derives `app/etc/env.php` from a template
    with a fresh cache `id_prefix` per release, and sets writable dirs;
 4. checks natively whether the database needs an upgrade (`db-status`), the
@@ -299,6 +300,25 @@ start = ["magento-cron.timer"]
 fastcgi = "127.0.0.1:9000"                      # or a socket path
 tmp_dir = "/var/www/tmp"                        # a dir php-fpm sees at the same path
 ```
+
+### Sending only what changed
+
+Before connecting, the runner reads a manifest out of the artifact: every
+path with its mode and the sha256 of its contents. The agent compares it with
+the manifest it stored for the live release (`.dep/manifests/<N>.json.zst`)
+and hard-links each file whose content and mode are unchanged from the live
+release, so the runner sends a zstd tar of only the new and changed files.
+A rebuild with no input changes sends a few KB instead of the whole artifact.
+The first deploy, or one whose live release has no stored manifest, sends the
+whole artifact as before.
+
+Hard-linked files are the same file in every release that has them, so nothing
+may change a release's files in place after its deploy. `app/etc/` is always
+copied rather than linked, because `bin/magento` may rewrite `config.php`. A
+file edited on the host since its deploy no longer matches the size and mtime
+in its stored manifest, so it is sent again rather than linked. On hosts where
+something does write into releases, `reuse = "copy"` gives every release its
+own copy of each file; that costs disk, but nothing extra on the network.
 
 `shared_dirs` and `writable_dirs` default to Deployer's magento2 recipe.
 `upgrade = "check"` refuses to swap when an upgrade or import is needed instead

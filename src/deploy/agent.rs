@@ -18,7 +18,8 @@ use anyhow::{Context, Result, anyhow, bail};
 use sha2::{Digest, Sha256};
 
 use super::config::{DeploySection, UpgradeMode};
-use super::protocol::{self, ArtifactFormat, Event, PROTOCOL, Plan};
+use super::manifest::{self, Entry};
+use super::protocol::{self, ArtifactFormat, Data, Event, Need, PROTOCOL, Plan};
 use super::{cron, envphp, fcgi, redis};
 
 /// A child process's stdout, pointed at our stderr: stdout is the protocol.
@@ -67,7 +68,25 @@ fn serve(input: &mut impl BufRead, out: &mut impl Write) -> Result<()> {
         );
     }
     plan.deploy.validate()?;
-    Deploy::new(plan, out)?.run(input)
+    let manifest = match plan.manifest_len {
+        Some(len) => {
+            let mut bytes = vec![0; len as usize];
+            input
+                .read_exact(&mut bytes)
+                .context("reading the manifest")?;
+            Some(manifest::decode(&bytes)?)
+        }
+        None => None,
+    };
+    let mut deploy = Deploy::new(plan, out)?;
+    deploy.manifest = manifest;
+    deploy.run(input)
+}
+
+/// Where a release's manifest is kept once it is live.
+fn manifest_path(root: &Path, release: &str) -> PathBuf {
+    root.join(".dep/manifests")
+        .join(format!("{release}.json.zst"))
 }
 
 fn own_sha256() -> Result<String> {
@@ -86,6 +105,8 @@ struct Deploy<'o, W: Write> {
     maintenance_on: bool,
     /// The incoming release's AMQP topology fingerprint, recorded at the swap.
     amqp_fingerprint: Option<String>,
+    /// The incoming release's manifest, from the runner.
+    manifest: Option<Vec<Entry>>,
     _lock: Option<File>,
 }
 
@@ -101,6 +122,7 @@ impl<'o, W: Write> Deploy<'o, W> {
             cron_paused: false,
             maintenance_on: false,
             amqp_fingerprint: None,
+            manifest: None,
             _lock: None,
         })
     }
@@ -172,17 +194,65 @@ impl<'o, W: Write> Deploy<'o, W> {
             .ok()
             .map(|l| self.root.join(l));
         self.step("prepare", t, None)?;
+
+        // Link (or copy) whatever the live release already has, and ask for the rest.
+        let t = Instant::now();
+        let new = self.manifest.take();
+        let live = previous.as_ref().and_then(|p| {
+            let live_name = p.file_name()?.to_str()?;
+            let bytes = fs::read(manifest_path(&self.root, live_name)).ok()?;
+            match manifest::decode(&bytes) {
+                Ok(m) => Some((p.clone(), live_name.to_string(), m)),
+                Err(e) => {
+                    eprintln!("agent: ignoring release {live_name}'s manifest: {e:#}");
+                    None
+                }
+            }
+        });
+        let need = match (&new, &live) {
+            (Some(new), Some((live_root, live_name, live))) => {
+                let reuse = manifest::plan_reuse(new, live_root, live);
+                manifest::materialize(&release, new, &reuse, live_root, self.d().reuse)?;
+                let reused = reuse.iter().filter(|r| r.is_some()).count();
+                let indices = manifest::needed(new, &reuse);
+                self.step(
+                    "reuse",
+                    t,
+                    Some(format!(
+                        "{reused} unchanged files from release {live_name}, {} to send",
+                        indices.len()
+                    )),
+                )?;
+                Need::Files { indices }
+            }
+            _ => Need::All,
+        };
+        let sending = match &need {
+            Need::All => None,
+            Need::Files { indices } => Some(indices.len()),
+        };
         protocol::send(
             self.out,
             &Event::Ready {
                 release: name.clone(),
+                need,
             },
         )?;
 
         let t = Instant::now();
-        let len = self.plan.artifact_len;
-        extract(input, len, self.plan.artifact_format, &release)?;
-        self.step("extract", t, Some(format!("{:.1} MB", len as f64 / 1e6)))?;
+        let data: Data =
+            protocol::recv(input)?.context("the runner closed the session before sending data")?;
+        extract(input, data.len, data.format, &release)?;
+        let stored = new
+            .as_deref()
+            .map(|m| manifest::finish(&release, m))
+            .transpose()?;
+        let mb = data.len as f64 / 1e6;
+        let detail = match sending {
+            Some(n) => format!("{n} files, {mb:.1} MB"),
+            None => format!("{mb:.1} MB"),
+        };
+        self.step("extract", t, Some(detail))?;
 
         let t = Instant::now();
         self.link_shared(&release)?;
@@ -285,6 +355,12 @@ impl<'o, W: Write> Deploy<'o, W> {
             None => {
                 let _ = fs::remove_file(&fp_path);
             }
+        }
+        // The next deploy reuses files by this manifest.
+        if let Some(stored) = &stored
+            && let Err(e) = store_manifest(&self.root, &name, stored)
+        {
+            eprintln!("agent: warning: could not store the manifest: {e:#}");
         }
         self.step("swap", t, None)?;
 
@@ -455,6 +531,17 @@ impl<'o, W: Write> Deploy<'o, W> {
             )?;
             pruned += 1;
         }
+        // Manifests of releases that are gone.
+        if let Ok(entries) = fs::read_dir(self.root.join(".dep/manifests")) {
+            for e in entries.flatten() {
+                let file = e.file_name();
+                let release = file.to_string_lossy();
+                let release = release.trim_end_matches(".json.zst");
+                if !releases.join(release).is_dir() {
+                    let _ = fs::remove_file(e.path());
+                }
+            }
+        }
         Ok(pruned)
     }
 }
@@ -482,6 +569,15 @@ fn lock(root: &Path) -> Result<File> {
         );
     }
     Ok(f)
+}
+
+fn store_manifest(root: &Path, release: &str, entries: &[Entry]) -> Result<()> {
+    let path = manifest_path(root, release);
+    fs::create_dir_all(path.parent().unwrap())?;
+    let tmp = path.with_extension("tmp");
+    fs::write(&tmp, manifest::encode(entries)?)?;
+    fs::rename(&tmp, &path)?;
+    Ok(())
 }
 
 fn spawn_trash_cleanup(releases: PathBuf) -> std::thread::JoinHandle<()> {

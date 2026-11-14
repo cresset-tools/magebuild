@@ -7,6 +7,7 @@ pub mod config;
 mod cron;
 mod envphp;
 mod fcgi;
+mod manifest;
 mod protocol;
 mod redis;
 pub mod runner;

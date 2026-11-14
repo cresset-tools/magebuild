@@ -1,15 +1,19 @@
 //! The runner ↔ agent protocol: JSON lines both ways over the ssh session's
-//! stdin and stdout, plus one raw byte stream (the artifact) whose length the
-//! plan announces. The agent's stderr is not part of it and goes straight to
-//! the runner's terminal.
+//! stdin and stdout, plus raw byte blocks whose length the line before them
+//! announces. The agent's stderr is not part of it and goes straight to the
+//! runner's terminal.
 //!
 //! ```text
 //! runner                              agent
 //!   ── (agent binary, only if missing) ─▶
 //!   ◀──────────── Hello ────────────────
 //!   ───────────── Plan ────────────────▶
-//!   ◀──────────── Ready ────────────────   lock taken, releases/N created
-//!   ── artifact bytes (plan.artifact_len) ▶
+//!   ── manifest bytes (plan.manifest_len) ▶
+//!   ◀──────────── Ready ────────────────   lock taken, releases/N created,
+//!                                          unchanged files linked; says
+//!                                          which files to send
+//!   ───────────── Data ────────────────▶
+//!   ── tar bytes (data.len) ───────────▶
 //!   ◀──────────── Step … ───────────────   one per finished step
 //!   ◀──────────── Done | Failed ────────
 //! ```
@@ -22,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use super::config::DeploySection;
 
 /// Bumped on any incompatible change; both sides refuse a mismatch.
-pub const PROTOCOL: u32 = 1;
+pub const PROTOCOL: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -51,11 +55,30 @@ impl ArtifactFormat {
 pub struct Plan {
     pub protocol: u32,
     pub deploy: DeploySection,
-    pub artifact_len: u64,
-    pub artifact_format: ArtifactFormat,
+    /// Length of the zstd manifest that follows the plan, if the artifact
+    /// has one (see `manifest::from_artifact`). Without one the agent asks
+    /// for everything.
+    pub manifest_len: Option<u64>,
     /// Recorded in `.dep/releases_log`, as Deployer does.
     pub user: String,
     pub target: String,
+}
+
+/// Runner → agent, after `Ready`: a tar of what the agent asked for follows.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Data {
+    pub len: u64,
+    pub format: ArtifactFormat,
+}
+
+/// What the agent wants sent.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum Need {
+    /// The whole artifact, as built.
+    All,
+    /// These files (indices into the manifest), as a tar; the rest is in place.
+    Files { indices: Vec<u32> },
 }
 
 /// Agent → runner.
@@ -71,6 +94,7 @@ pub enum Event {
     },
     Ready {
         release: String,
+        need: Need,
     },
     Step {
         name: String,

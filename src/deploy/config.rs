@@ -73,6 +73,20 @@ pub struct DeploySection {
     /// import they call for. `check` only reports what would run.
     #[serde(default)]
     pub upgrade: UpgradeMode,
+    /// How files unchanged since the live release get into the new one.
+    #[serde(default)]
+    pub reuse: Reuse,
+}
+
+/// `hardlink` shares unchanged files between releases, so nothing may change a
+/// release's files in place after its deploy (`app/etc/` is always copied).
+/// `copy` gives every release its own files.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Reuse {
+    #[default]
+    Hardlink,
+    Copy,
 }
 
 /// Derive env.php from `source` (relative to the deploy root), rolling the cache
@@ -205,6 +219,7 @@ mod tests {
         assert_eq!(d.shared_files, ["app/etc/env.php", "var/.maintenance.ip"]);
         assert!(matches!(d.cron, Cron::None));
         assert_eq!(d.upgrade, UpgradeMode::Auto);
+        assert_eq!(d.reuse, Reuse::Hardlink);
         d.validate().unwrap();
     }
 
