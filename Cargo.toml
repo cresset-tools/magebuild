@@ -23,10 +23,10 @@ magecommand = { git = "https://github.com/cresset-tools/magequery", rev = "01bbd
 # composer-install (install-from-lock), composer-autoload (optimized
 # dump-autoload), composer-manifest (lockfile model), composer-patches
 # (cweagans-style patches).
-composer-install = { git = "https://github.com/cresset-tools/composer-client", rev = "16535bccfa29ef6f8b688e307fa9726c699842f9" }
-composer-autoload = { git = "https://github.com/cresset-tools/composer-client", rev = "16535bccfa29ef6f8b688e307fa9726c699842f9" }
-composer-manifest = { git = "https://github.com/cresset-tools/composer-client", rev = "16535bccfa29ef6f8b688e307fa9726c699842f9" }
-composer-patches = { git = "https://github.com/cresset-tools/composer-client", rev = "16535bccfa29ef6f8b688e307fa9726c699842f9" }
+composer-install = { git = "https://github.com/cresset-tools/composer-client", rev = "bde2d4190d1b3baf074c12a9cee3965a070660d0" }
+composer-autoload = { git = "https://github.com/cresset-tools/composer-client", rev = "bde2d4190d1b3baf074c12a9cee3965a070660d0" }
+composer-manifest = { git = "https://github.com/cresset-tools/composer-client", rev = "bde2d4190d1b3baf074c12a9cee3965a070660d0" }
+composer-patches = { git = "https://github.com/cresset-tools/composer-client", rev = "bde2d4190d1b3baf074c12a9cee3965a070660d0" }
 
 # CLI + orchestration.
 clap = { version = "4", features = ["derive"] }
