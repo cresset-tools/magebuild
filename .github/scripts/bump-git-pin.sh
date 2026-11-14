@@ -45,6 +45,29 @@ if [ "${revs}" = "${new}" ]; then
   exit 0
 fi
 
+# Never move a pin backwards. A pin is sometimes set by hand to a commit past
+# the newest release (to use a fix before it is released); re-pinning to that
+# release would silently drop the fix. Bump only when the release has commits
+# some current pin lacks: `compare/<pin>...<release>` reports the release as
+# `ahead` of or `diverged` from the pin. `behind` and `identical` mean the pin
+# already contains the release.
+if [ -z "${BUMP_NEW_REV:-}" ]; then
+  needed=false
+  for cur in ${revs}; do
+    status=$(gh api "repos/${repo}/compare/${cur}...${new}" -q .status)
+    echo "release vs pin ${cur}: ${status}"
+    case "${status}" in
+      behind|identical) ;;
+      *) needed=true ;;
+    esac
+  done
+  if [ "${needed}" = false ]; then
+    echo "The current pin already contains ${tag} — nothing to do."
+    echo "changed=false" >> "${out}"
+    exit 0
+  fi
+fi
+
 # Rewrite the rev only on this repository's lines, so two repositories that
 # happen to share a rev prefix, or crates of one repository that drifted onto
 # different revs, all end up on the new commit.
