@@ -1,0 +1,106 @@
+# Keep magebuild's git-pinned sibling crates on their latest release.
+#
+# magebuild links two sibling repositories as git deps pinned to an exact
+# commit (Cargo.toml `rev = ...`):
+#
+#   - cresset-tools/magequery        magequery-core, magecommand-engine, magecommand
+#   - cresset-tools/composer-client  composer-install, composer-autoload,
+#                                    composer-manifest, composer-patches
+#
+# For each repository this job resolves the newest GitHub release to its
+# commit, re-pins every dependency that points at that repository, refreshes
+# Cargo.lock, and opens/updates ONE PR per repository (branches:
+# chore/bump-magequery, chore/bump-composer-client). The crate list is read
+# from Cargo.toml, so a newly added dependency on either repository is picked
+# up without touching this file.
+#
+# composer-client versions its crates independently, so "the newest release"
+# is whichever crate was released last. All crates released from one release
+# PR share a commit, and that commit holds every crate's current source, so
+# pinning all four to it is always consistent.
+#
+# It opens a PR rather than auto-merging on purpose: a minor can restructure
+# an API (magequery 0.13 -> 0.14 moved crates around), so the bump rides the
+# normal PR CI (cargo test on 3 OSes + clippy) and a human glances before
+# merge. Flip to auto-merge by adding `gh pr merge --auto --squash` on the
+# created PR if you'd rather.
+#
+# The PR subject is `fix(deps):` so that merging it makes release-please cut a
+# magebuild patch release — the bumped engines only reach users through one.
+#
+# The PR is authored via the release-please bot app (same client-id) so its CI
+# actually runs — PRs opened with the default GITHUB_TOKEN don't trigger
+# workflows.
+#
+# Triggered by the sibling repositories: each one's release workflow sends a
+# `repository_dispatch` here right after publishing a release (type
+# `magequery-release` or `composer-client-release`), so the bump PR opens
+# within seconds of the release — no polling. Every run checks both
+# repositories; the one that did not release is a no-op. Also runnable by hand
+# via the Actions "Run workflow" button.
+name: bump-git-pins
+
+on:
+  repository_dispatch:
+    types: [magequery-release, composer-client-release]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    strategy:
+      # One repository failing to resolve must not block the other's bump.
+      fail-fast: false
+      matrix:
+        include:
+          - repo: cresset-tools/magequery
+            label: magequery/magecommand
+            branch: chore/bump-magequery
+          - repo: cresset-tools/composer-client
+            label: composer-client
+            branch: chore/bump-composer-client
+    steps:
+      - name: Mint app token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: Iv23liCDQHGQVKPD1b41
+          private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Re-pin to the latest ${{ matrix.label }} release
+        id: bump
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ matrix.repo }}
+        run: .github/scripts/bump-git-pin.sh "$REPO"
+
+      - name: Open/update the bump PR
+        if: steps.bump.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          branch: ${{ matrix.branch }}
+          add-paths: |
+            Cargo.toml
+            Cargo.lock
+          commit-message: "fix(deps): bump ${{ matrix.label }} to ${{ steps.bump.outputs.tag }}"
+          title: "fix(deps): bump ${{ matrix.label }} to ${{ steps.bump.outputs.tag }}"
+          body: |
+            Automated re-pin of ${{ steps.bump.outputs.crates }} to the latest
+            `${{ matrix.repo }}` release **${{ steps.bump.outputs.tag }}**
+            (`${{ steps.bump.outputs.new }}`), with a refreshed `Cargo.lock`.
+
+            Review before merge — a minor can restructure an API, so let CI
+            (cargo test × 3 OSes + clippy) confirm the build first.
+
+            _Opened by the `bump-git-pins` workflow._
