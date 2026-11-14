@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.11.0...magebuild-v0.12.0) (2026-11-14)
+
+
+### Features
+
+* **magebuild:** deploy only the files that changed ([d936fa9](https://github.com/cresset-tools/magebuild/commit/d936fa9dfe0263d435e9054a81bed7fe1c174831))
+
 ## [0.11.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.10.0...magebuild-v0.11.0) (2026-11-14)
 
 
