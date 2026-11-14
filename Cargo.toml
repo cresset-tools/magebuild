@@ -21,11 +21,9 @@ magecommand = { git = "https://github.com/cresset-tools/magequery", rev = "70cca
 # Composer client — git-pinned to cresset-tools/composer-client, so a fix
 # there is usable as soon as it lands, without waiting on a crates.io release.
 # composer-install (install-from-lock), composer-autoload (optimized
-# dump-autoload), composer-manifest (lockfile model), composer-patches
-# (cweagans-style patches).
+# dump-autoload), composer-patches (cweagans-style patches).
 composer-install = { git = "https://github.com/cresset-tools/composer-client", rev = "bde2d4190d1b3baf074c12a9cee3965a070660d0" }
 composer-autoload = { git = "https://github.com/cresset-tools/composer-client", rev = "bde2d4190d1b3baf074c12a9cee3965a070660d0" }
-composer-manifest = { git = "https://github.com/cresset-tools/composer-client", rev = "bde2d4190d1b3baf074c12a9cee3965a070660d0" }
 composer-patches = { git = "https://github.com/cresset-tools/composer-client", rev = "bde2d4190d1b3baf074c12a9cee3965a070660d0" }
 
 # CLI + orchestration.
@@ -47,7 +45,6 @@ anyhow = "1"
 # deploy agent: flock, kill, getuid; and the agent binary's hash.
 libc = "0.2"
 sha2 = "0.10"
-tracing = "0.1"
 
 [profile.release]
 codegen-units = 1

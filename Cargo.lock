@@ -1734,7 +1734,6 @@ dependencies = [
  "clap",
  "composer-autoload",
  "composer-install",
- "composer-manifest",
  "composer-patches",
  "flate2",
  "gzp",
@@ -1748,7 +1747,6 @@ dependencies = [
  "sha2 0.10.9",
  "tar",
  "toml",
- "tracing",
  "zstd",
 ]
 

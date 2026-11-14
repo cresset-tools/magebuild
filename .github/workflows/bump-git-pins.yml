@@ -5,7 +5,7 @@
 #
 #   - cresset-tools/magequery        magequery-core, magecommand-engine, magecommand
 #   - cresset-tools/composer-client  composer-install, composer-autoload,
-#                                    composer-manifest, composer-patches
+#                                    composer-patches
 #
 # For each repository this job resolves the newest GitHub release to its
 # commit, re-pins every dependency that points at that repository, refreshes
