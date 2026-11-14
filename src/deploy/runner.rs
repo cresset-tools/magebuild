@@ -34,7 +34,10 @@ pub fn run(mut deploy: DeploySection, opts: Options) -> Result<ExitCode> {
 
     let agent_path = match opts.agent {
         Some(p) => p,
-        None => std::env::current_exe().context("locating this executable")?,
+        None if cfg!(target_os = "linux") => {
+            std::env::current_exe().context("locating this executable")?
+        }
+        None => bail!("pass --agent with a Linux build of magebuild for the host"),
     };
     let agent = std::fs::read(&agent_path)
         .with_context(|| format!("reading the agent binary {}", agent_path.display()))?;

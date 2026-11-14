@@ -25,8 +25,8 @@ it (`$XDG_CACHE_HOME/magebuild/<version>/`), verifies its SHA-256, and execs
 it. The package version maps 1:1 to the magebuild release:
 `cresset/magebuild:0.1.0` runs `magebuild-v0.1.0`.
 
-Prebuilt targets: Linux x86_64 (gnu/musl), Linux arm64 (gnu), macOS arm64/x64,
-Windows x64. `ext-curl` is recommended; `ext-zip` is required on Windows.
+Prebuilt targets: Linux x86_64 (gnu/musl), Linux arm64 (gnu), macOS arm64.
+Windows is not supported. `ext-curl` is recommended.
 
 The download layout is also declared machine-readably in composer.json under
 `extra.bougie.native-binary` (spec 1 = the cargo-dist release layout). Tools

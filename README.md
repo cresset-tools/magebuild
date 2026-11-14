@@ -26,7 +26,8 @@ curl --proto '=https' --tlsv1.2 -LsSf \
 ```
 
 Prebuilt binaries ship for Linux (gnu and musl, x86_64 and arm64), macOS
-(Apple Silicon), and Windows. Every release archive is Sigstore-signed.
+(Apple Silicon). Windows is not supported. Every release archive is
+Sigstore-signed.
 
 ### Composer (for Deployer / CI projects)
 

@@ -82,12 +82,9 @@ jobs:
           for f in \
             artifacts/*.tar.gz \
             artifacts/*.tar.gz.sha256 \
-            artifacts/*.zip \
-            artifacts/*.zip.sha256 \
             artifacts/*.sig \
             artifacts/sha256.sum \
             artifacts/*.sh \
-            artifacts/*.ps1 \
           ; do
             cp "$f" staging/
           done
@@ -118,7 +115,7 @@ jobs:
         if: ${{ !fromJson(inputs.plan).announcement_is_prerelease }}
         run: |
           set -euo pipefail
-          for installer in magebuild-installer.sh magebuild-installer.ps1; do
+          for installer in magebuild-installer.sh; do
             if [ ! -f "staging/${installer}" ]; then
               echo "Missing ${installer} in staging — dist didn't emit it?" >&2
               exit 1

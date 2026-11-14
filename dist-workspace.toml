@@ -1,5 +1,5 @@
-# dist configuration. Produces per-target binary archives plus shell/powershell
-# installers. release-please owns the whole release: it publishes the
+# dist configuration. Produces per-target binary archives plus a shell
+# installer. release-please owns the whole release: it publishes the
 # `magebuild-v<version>` GitHub Release (creating the tag), and the
 # `release: published` event triggers dist to build the binaries and upload
 # them onto that release.
@@ -24,17 +24,15 @@ cargo-dist-version = "0.32.0"
 # CI provider.
 ci = "github"
 
-# uv-style installers: `curl ... | sh` on Unix, `irm ... | iex` on Windows.
-installers = ["shell", "powershell"]
+# uv-style installer: `curl ... | sh`. Windows is not supported.
+installers = ["shell"]
 
-# Archive formats per platform.
-windows-archive = ".zip"
 unix-archive = ".tar.gz"
 
 # Target triples we ship prebuilt binaries for. Linux gets both gnu and musl
 # (older distros and Alpine both work) plus arm64 (devcontainers, Graviton CI);
 # macOS is Apple Silicon only (GitHub's Intel macOS runners are too scarce to
-# release on); Windows is x64. Anything that
+# release on). Windows is not supported. Anything that
 # auto-downloads magebuild by triple name (a Deployer recipe, CI action) must
 # stay in sync with this list.
 targets = [
@@ -42,7 +40,6 @@ targets = [
     "x86_64-unknown-linux-musl",
     "aarch64-unknown-linux-gnu",
     "aarch64-apple-darwin",
-    "x86_64-pc-windows-msvc",
 ]
 
 # Keep the tarballs to just the binary the installer drops on PATH.
@@ -69,7 +66,7 @@ install-path = ["$XDG_BIN_HOME/", "$XDG_DATA_HOME/../bin", "~/.local/bin"]
 
 # Mirror first, GitHub fallback. The "simple" host MUST be listed in `hosting`
 # for it to reach the generated installer. Order here is the download
-# precedence the shell/powershell installers use (try the mirror, fall back to
+# precedence the shell installer uses (try the mirror, fall back to
 # the GitHub release if it's offline / hasn't ingested the new tag yet). Shared
 # cresset origin mirror (origin.bougie.tools; see publish-mirror.yml +
 # cresset-tools/infra).

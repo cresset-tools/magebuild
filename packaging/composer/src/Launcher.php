@@ -50,14 +50,14 @@ final class Launcher
     private static function ensureBinary(): string
     {
         $target = self::targetTriple();
-        $binName = self::binaryName();
+        $binName = self::TOOL;
         $cached = self::cacheDir() . DIRECTORY_SEPARATOR . $binName;
         if (is_file($cached)) {
             return $cached;
         }
 
         $tag = 'magebuild-v' . MAGEBUILD_VERSION;
-        $archive = 'magebuild-' . $target . (self::isWindows() ? '.zip' : '.tar.gz');
+        $archive = 'magebuild-' . $target . '.tar.gz';
 
         $tmp = self::makeTempDir();
         try {
@@ -87,9 +87,7 @@ final class Launcher
             if (!@copy($staged, $partial)) {
                 throw new RuntimeException('failed to stage ' . self::TOOL . ' binary into the cache');
             }
-            if (!self::isWindows()) {
-                @chmod($partial, 0o755);
-            }
+            @chmod($partial, 0o755);
             if (!@rename($partial, $cached)) {
                 @unlink($partial);
                 throw new RuntimeException('failed to install ' . self::TOOL . ' binary into the cache');
@@ -123,18 +121,10 @@ final class Launcher
                 }
                 throw new RuntimeException('no prebuilt ' . self::TOOL . ' binary for Intel macOS (Apple Silicon only)');
             case 'Windows':
-                if ($isX64) {
-                    return 'x86_64-pc-windows-msvc';
-                }
-                throw new RuntimeException('no prebuilt ' . self::TOOL . " binary for Windows/$machine (x64 only)");
+                throw new RuntimeException(self::TOOL . ' does not support Windows');
             default:
                 throw new RuntimeException('unsupported OS: ' . PHP_OS_FAMILY);
         }
-    }
-
-    private static function isWindows(): bool
-    {
-        return PHP_OS_FAMILY === 'Windows';
     }
 
     /** Best-effort musl detection (Alpine and friends). */
@@ -148,21 +138,12 @@ final class Launcher
         return is_string($out) && stripos($out, 'musl') !== false;
     }
 
-    private static function binaryName(): string
-    {
-        return self::isWindows() ? self::TOOL . '.exe' : self::TOOL;
-    }
-
     private static function cacheDir(): string
     {
-        if (self::isWindows()) {
-            $base = getenv('LOCALAPPDATA') ?: sys_get_temp_dir();
-        } else {
-            $base = getenv('XDG_CACHE_HOME');
-            if ($base === false || $base === '') {
-                $home = getenv('HOME') ?: sys_get_temp_dir();
-                $base = $home . '/.cache';
-            }
+        $base = getenv('XDG_CACHE_HOME');
+        if ($base === false || $base === '') {
+            $home = getenv('HOME') ?: sys_get_temp_dir();
+            $base = $home . '/.cache';
         }
 
         // Per-tool slot, matching what a native-binary prefetch would derive
@@ -265,20 +246,6 @@ final class Launcher
 
     private static function extract(string $archive, string $into): void
     {
-        if (self::isWindows()) {
-            if (!class_exists(\ZipArchive::class)) {
-                throw new RuntimeException('ext-zip is required to install ' . self::TOOL . ' on Windows');
-            }
-            $zip = new \ZipArchive();
-            if ($zip->open($archive) !== true) {
-                throw new RuntimeException('failed to open zip archive');
-            }
-            $zip->extractTo($into);
-            $zip->close();
-
-            return;
-        }
-
         // .tar.gz via PharData (ext-phar is enabled by default).
         try {
             $phar = new \PharData($archive);
