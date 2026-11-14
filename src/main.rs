@@ -11,6 +11,7 @@ mod deploy;
 mod graph;
 mod json;
 mod preflight;
+mod regstatus;
 mod render;
 mod scheduler;
 mod steps;
@@ -102,6 +103,12 @@ enum Command {
     /// app:config:status` decides it, without booting Magento: exits 2 when an
     /// import is needed.
     ConfigStatus,
+    /// Whether `setup:upgrade` has a theme to register: a native Mage-OS
+    /// `theme:registration:status`. Exits 2 when a theme is not registered.
+    ThemeStatus,
+    /// Whether `setup:upgrade` has a database queue to add: the MysqlMq part
+    /// of Mage-OS's `queue:config:status`. Exits 2 when a queue is missing.
+    QueueStatus,
     /// Ship a built artifact to the `[deploy]` host: one ssh session, a small
     /// agent on the host (uploaded only when that build is not there yet)
     /// doing the release, shared links, upgrade check, swap and cleanup.
@@ -146,6 +153,12 @@ fn run() -> Result<ExitCode> {
     }
     if matches!(cli.command, Some(Command::ConfigStatus)) {
         return configstatus::run(&root, cli.json);
+    }
+    if matches!(cli.command, Some(Command::ThemeStatus)) {
+        return regstatus::themes(&root, cli.json);
+    }
+    if matches!(cli.command, Some(Command::QueueStatus)) {
+        return regstatus::queues(&root, cli.json);
     }
     if matches!(cli.command, Some(Command::Agent)) {
         return Ok(deploy::agent::run());

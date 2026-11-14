@@ -60,6 +60,8 @@ magebuild node di-compile              # run one node and its dependencies
 magebuild --json                       # machine-readable output
 magebuild db-status                    # does the database need setup:upgrade?
 magebuild config-status                # does the config need app:config:import?
+magebuild theme-status                 # does setup:upgrade have a theme to register?
+magebuild queue-status                 # ... or a database queue to add?
 magebuild deploy --from release.tar.gz # ship a built release to the [deploy] host
 ```
 
@@ -226,6 +228,28 @@ doesn't reproduce exactly (a PHP constant, an exponent-form float,
 `MAGENTO_DC__OVERRIDE`); run `bin/magento app:config:status` then. In
 `deploy.php`, the recipe's `config_import_needed` takes it the same way as
 `db-status` above.
+
+### Themes and queues: `theme-status` and `queue-status`
+
+`setup:db:status` doesn't look at themes or message queues, so a release that
+only adds one of them looks up to date to it. Mage-OS added
+`theme:registration:status` and `queue:config:status` for this, and these are
+native versions with the same exit codes (0 when nothing is missing, 2 when
+`setup:upgrade` has something to register):
+
+- `theme-status` lists the themes that a `registration.php` declares but the
+  `theme` table doesn't hold;
+- `queue-status` lists the topology queues (`queue_topology.xml`, plus the
+  older `queue.xml` when `Magento_Amqp` is enabled) missing from the `queue`
+  table.
+
+RabbitMQ keeps its own state, which these commands don't read. Instead,
+`magebuild deploy` fingerprints what Magento declares there from (env.php's
+`queue` section and the modules' `queue_topology.xml`, `queue.xml` and
+`communication.xml`), keeps the live release's fingerprint in
+`.dep/magebuild-amqp-topology`, and upgrades when it changes. On a store with
+RabbitMQ, the first deploy with this upgrades once. A queue deleted on the
+broker by hand goes unnoticed. `queue-status` prints the fingerprint.
 ## Deploying (`magebuild deploy`)
 
 `magebuild deploy` replaces Deployer's deploy stage. It opens one ssh session
@@ -239,9 +263,11 @@ at a time, so a deploy costs one round trip instead of about a hundred:
 2. unpacks the artifact as it streams in;
 3. links `shared/` into the release, derives `app/etc/env.php` from a template
    with a fresh cache `id_prefix` per release, and sets writable dirs;
-4. checks natively whether the database needs an upgrade (`db-status`) and the
-   config an import (`config-status`), asking `bin/magento app:config:status`
-   only when the config holds something the native check can't hash exactly;
+4. checks natively whether the database needs an upgrade (`db-status`), the
+   config an import (`config-status`), and whether there is a theme to register
+   or a queue to set up (`theme-status`, `queue-status`, and the RabbitMQ
+   topology fingerprint below), asking `bin/magento app:config:status` only when
+   the config holds something the native check can't hash exactly;
 5. pauses cron, runs the import or upgrade only when needed (maintenance mode on
    the live release meanwhile), then swaps `current` atomically;
 6. resets opcache over FastCGI, deletes the previous release's cache keys,

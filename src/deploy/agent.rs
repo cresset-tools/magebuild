@@ -84,6 +84,8 @@ struct Deploy<'o, W: Write> {
     release: Option<(String, PathBuf)>,
     cron_paused: bool,
     maintenance_on: bool,
+    /// The incoming release's AMQP topology fingerprint, recorded at the swap.
+    amqp_fingerprint: Option<String>,
     _lock: Option<File>,
 }
 
@@ -98,6 +100,7 @@ impl<'o, W: Write> Deploy<'o, W> {
             release: None,
             cron_paused: false,
             maintenance_on: false,
+            amqp_fingerprint: None,
             _lock: None,
         })
     }
@@ -196,14 +199,36 @@ impl<'o, W: Write> Deploy<'o, W> {
 
         let t = Instant::now();
         let mage = magequery_core::Magento::open(&release).map_err(|e| anyhow!(e))?;
-        let db_upgrade = db_upgrade_needed(&mage)?;
+        let schema_or_patches = db_upgrade_needed(&mage)?;
         let config_import = self.config_import_needed(&mage, &release)?;
+        let registration = registration_needed(&mage);
+        self.amqp_fingerprint = registration.amqp_fingerprint.clone();
+        let amqp_changed = registration.amqp_fingerprint.as_ref().is_some_and(|fp| {
+            fs::read_to_string(self.root.join(AMQP_FINGERPRINT))
+                .ok()
+                .as_deref()
+                .map(str::trim)
+                != Some(fp.as_str())
+        });
         drop(mage);
-        let needs = match (db_upgrade, config_import) {
-            (false, false) => "database and config up to date".to_string(),
-            (true, false) => "database upgrade needed".to_string(),
-            (false, true) => "config import needed".to_string(),
-            (true, true) => "database upgrade and config import needed".to_string(),
+        // setup:db-schema:upgrade runs MysqlMq's and Amqp's recurring setup (queues),
+        // setup:db-data:upgrade the Theme module's (theme registration).
+        let db_upgrade = schema_or_patches || !registration.reasons.is_empty() || amqp_changed;
+        let mut parts: Vec<&str> = Vec::new();
+        if schema_or_patches {
+            parts.push("database upgrade");
+        }
+        if config_import {
+            parts.push("config import");
+        }
+        parts.extend(registration.reasons.iter().map(String::as_str));
+        if amqp_changed {
+            parts.push("AMQP topology setup");
+        }
+        let needs = if parts.is_empty() {
+            "database, config, themes and queues up to date".to_string()
+        } else {
+            format!("{} needed", parts.join(", "))
         };
         self.step("check", t, Some(needs.clone()))?;
 
@@ -252,6 +277,15 @@ impl<'o, W: Write> Deploy<'o, W> {
         swap(&self.root, &name)?;
         // Past the swap there is nothing to roll back: the new release is live.
         self.release = None;
+        // The live release's topology is now what the broker has (the upgrade ran
+        // when it changed), so the next deploy compares against it.
+        let fp_path = self.root.join(AMQP_FINGERPRINT);
+        match &self.amqp_fingerprint {
+            Some(fp) => fs::write(&fp_path, format!("{fp}\n"))?,
+            None => {
+                let _ = fs::remove_file(&fp_path);
+            }
+        }
         self.step("swap", t, None)?;
 
         let t = Instant::now();
@@ -488,6 +522,62 @@ fn extract(input: &mut impl Read, len: u64, format: ArtifactFormat, dest: &Path)
         );
     }
     Ok(())
+}
+
+/// Where the live release's AMQP topology fingerprint is kept.
+const AMQP_FINGERPRINT: &str = ".dep/magebuild-amqp-topology";
+
+struct Registration {
+    /// What `setup:upgrade` would register: unregistered themes, missing
+    /// database queues, or a check that couldn't run.
+    reasons: Vec<String>,
+    amqp_fingerprint: Option<String>,
+}
+
+/// The themes and queues `setup:upgrade` registers, which `setup:db:status`
+/// does not check. A check that can't run counts as needing the upgrade.
+fn registration_needed(mage: &magequery_core::Magento) -> Registration {
+    let mut reasons = Vec::new();
+    match mage.unregistered_themes() {
+        Ok(missing) if missing.is_empty() => {}
+        Ok(missing) => {
+            eprintln!(
+                "agent: theme-status: not registered: {}",
+                missing.join(", ")
+            );
+            reasons.push("theme registration".to_string());
+        }
+        Err(e) => {
+            eprintln!("agent: theme-status: {e}; upgrading to be safe");
+            reasons.push("theme registration (unchecked)".to_string());
+        }
+    }
+    match mage.missing_db_queues() {
+        Ok(missing) if missing.is_empty() => {}
+        Ok(missing) => {
+            eprintln!(
+                "agent: queue-status: not in the queue table: {}",
+                missing.join(", ")
+            );
+            reasons.push("queue setup".to_string());
+        }
+        Err(e) => {
+            eprintln!("agent: queue-status: {e}; upgrading to be safe");
+            reasons.push("queue setup (unchecked)".to_string());
+        }
+    }
+    let amqp_fingerprint = match mage.amqp_topology_fingerprint() {
+        Ok(fp) => fp,
+        Err(e) => {
+            eprintln!("agent: AMQP topology: {e}; upgrading to be safe");
+            reasons.push("AMQP topology setup (unchecked)".to_string());
+            None
+        }
+    };
+    Registration {
+        reasons,
+        amqp_fingerprint,
+    }
 }
 
 fn db_upgrade_needed(mage: &magequery_core::Magento) -> Result<bool> {
