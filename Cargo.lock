@@ -1755,7 +1755,7 @@ dependencies = [
 [[package]]
 name = "magecommand"
 version = "0.25.1"
-source = "git+https://github.com/cresset-tools/magequery?rev=01bbd27564ade07fa085852d7156b62214f7e253#01bbd27564ade07fa085852d7156b62214f7e253"
+source = "git+https://github.com/cresset-tools/magequery?rev=2311f5969fbb4fd5a98d707ee0b53504bd9c2e0e#2311f5969fbb4fd5a98d707ee0b53504bd9c2e0e"
 dependencies = [
  "anstyle",
  "anyhow",
@@ -1783,7 +1783,7 @@ dependencies = [
 [[package]]
 name = "magecommand-engine"
 version = "0.25.1"
-source = "git+https://github.com/cresset-tools/magequery?rev=01bbd27564ade07fa085852d7156b62214f7e253#01bbd27564ade07fa085852d7156b62214f7e253"
+source = "git+https://github.com/cresset-tools/magequery?rev=2311f5969fbb4fd5a98d707ee0b53504bd9c2e0e#2311f5969fbb4fd5a98d707ee0b53504bd9c2e0e"
 dependencies = [
  "blake3",
  "magecommand-php",
@@ -1798,7 +1798,7 @@ dependencies = [
 [[package]]
 name = "magecommand-less"
 version = "0.25.1"
-source = "git+https://github.com/cresset-tools/magequery?rev=01bbd27564ade07fa085852d7156b62214f7e253#01bbd27564ade07fa085852d7156b62214f7e253"
+source = "git+https://github.com/cresset-tools/magequery?rev=2311f5969fbb4fd5a98d707ee0b53504bd9c2e0e#2311f5969fbb4fd5a98d707ee0b53504bd9c2e0e"
 dependencies = [
  "cssparser 0.37.0",
  "fancy-regex",
@@ -1810,7 +1810,7 @@ dependencies = [
 [[package]]
 name = "magecommand-php"
 version = "0.25.1"
-source = "git+https://github.com/cresset-tools/magequery?rev=01bbd27564ade07fa085852d7156b62214f7e253#01bbd27564ade07fa085852d7156b62214f7e253"
+source = "git+https://github.com/cresset-tools/magequery?rev=2311f5969fbb4fd5a98d707ee0b53504bd9c2e0e#2311f5969fbb4fd5a98d707ee0b53504bd9c2e0e"
 dependencies = [
  "memchr",
 ]
@@ -1818,7 +1818,7 @@ dependencies = [
 [[package]]
 name = "magequery-core"
 version = "0.25.1"
-source = "git+https://github.com/cresset-tools/magequery?rev=01bbd27564ade07fa085852d7156b62214f7e253#01bbd27564ade07fa085852d7156b62214f7e253"
+source = "git+https://github.com/cresset-tools/magequery?rev=2311f5969fbb4fd5a98d707ee0b53504bd9c2e0e#2311f5969fbb4fd5a98d707ee0b53504bd9c2e0e"
 dependencies = [
  "aes",
  "base64 0.22.1",
@@ -1829,6 +1829,7 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
+ "sha1",
  "simple-rijndael",
  "thiserror 2.0.19",
 ]
