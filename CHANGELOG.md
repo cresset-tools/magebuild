@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.11.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.10.0...magebuild-v0.11.0) (2026-11-14)
+
+
+### Features
+
+* **magebuild:** check app:config:status natively ([c377002](https://github.com/cresset-tools/magebuild/commit/c377002c20c8e6a8e393279428d129ce69350c9a))
+* **magebuild:** upgrade when a theme or queue needs registering ([21e9739](https://github.com/cresset-tools/magebuild/commit/21e9739ac8d82061110d6ab617938c33182bf4c5))
+
+
+### Bug Fixes
+
+* **deps:** bump composer-client to composer-install-v0.6.0 ([#36](https://github.com/cresset-tools/magebuild/issues/36)) ([5a932d0](https://github.com/cresset-tools/magebuild/commit/5a932d092a7d1b88998335e1a9a27a21d0fbec51))
+
 ## [0.10.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.9.0...magebuild-v0.10.0) (2026-11-14)
 
 
