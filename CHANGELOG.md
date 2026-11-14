@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.10.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.9.0...magebuild-v0.10.0) (2026-11-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **magebuild:** drop Windows support
+
+### Features
+
+* **magebuild:** deploy a release through an agent on the host ([d17e354](https://github.com/cresset-tools/magebuild/commit/d17e354a0a4a256f84b91fd470f298d2b1a9a2fe))
+* **magebuild:** drop Windows support ([8095970](https://github.com/cresset-tools/magebuild/commit/80959707c00002f305c1065daa81c7cc12506ce5))
+
 ## [0.9.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.8.0...magebuild-v0.9.0) (2026-11-13)
 
 
