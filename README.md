@@ -59,6 +59,7 @@ magebuild plan                         # print the DAG + parallel schedule, run 
 magebuild node di-compile              # run one node and its dependencies
 magebuild --json                       # machine-readable output
 magebuild db-status                    # does the database need setup:upgrade?
+magebuild config-status                # does the config need app:config:import?
 magebuild deploy --from release.tar.gz # ship a built release to the [deploy] host
 ```
 
@@ -212,6 +213,19 @@ set('database_upgrade_needed', function () {
 });
 ```
 
+
+### Gating `app:config:import` with `config-status`
+
+`magebuild config-status` is a native `bin/magento app:config:status`. Like
+Magento, it hashes each imported section of the deployment config (`scopes`,
+`themes`, `system`, plus any section a module registers with `ImporterPool`)
+and compares it with the hash the last `app:config:import` stored in the `flag`
+table. Exit codes match Magento's: 0 when up to date, 2 when an import is
+needed. It exits 1 on an error, and also when the config holds something it
+doesn't reproduce exactly (a PHP constant, an exponent-form float,
+`MAGENTO_DC__OVERRIDE`); run `bin/magento app:config:status` then. In
+`deploy.php`, the recipe's `config_import_needed` takes it the same way as
+`db-status` above.
 ## Deploying (`magebuild deploy`)
 
 `magebuild deploy` replaces Deployer's deploy stage. It opens one ssh session
@@ -225,8 +239,9 @@ at a time, so a deploy costs one round trip instead of about a hundred:
 2. unpacks the artifact as it streams in;
 3. links `shared/` into the release, derives `app/etc/env.php` from a template
    with a fresh cache `id_prefix` per release, and sets writable dirs;
-4. checks for a database upgrade natively (`db-status`) and for a config import
-   (`bin/magento app:config:status`);
+4. checks natively whether the database needs an upgrade (`db-status`) and the
+   config an import (`config-status`), asking `bin/magento app:config:status`
+   only when the config holds something the native check can't hash exactly;
 5. pauses cron, runs the import or upgrade only when needed (maintenance mode on
    the live release meanwhile), then swaps `current` atomically;
 6. resets opcache over FastCGI, deletes the previous release's cache keys,

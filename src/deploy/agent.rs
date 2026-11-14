@@ -195,8 +195,10 @@ impl<'o, W: Write> Deploy<'o, W> {
         self.step("shared", t, None)?;
 
         let t = Instant::now();
-        let db_upgrade = db_upgrade_needed(&release)?;
-        let config_import = self.config_import_needed(&release)?;
+        let mage = magequery_core::Magento::open(&release).map_err(|e| anyhow!(e))?;
+        let db_upgrade = db_upgrade_needed(&mage)?;
+        let config_import = self.config_import_needed(&mage, &release)?;
+        drop(mage);
         let needs = match (db_upgrade, config_import) {
             (false, false) => "database and config up to date".to_string(),
             (true, false) => "database upgrade needed".to_string(),
@@ -365,9 +367,22 @@ impl<'o, W: Write> Deploy<'o, W> {
         Ok(())
     }
 
-    /// `bin/magento app:config:status`: exit 2 means an import is needed.
-    /// Still a PHP bootstrap; a native port is step 2 of the plan.
-    fn config_import_needed(&self, release: &Path) -> Result<bool> {
+    /// Whether `app:config:import` has work to do: magequery's native
+    /// `app:config:status`, or `bin/magento app:config:status` when the config
+    /// holds something the native check doesn't reproduce exactly.
+    fn config_import_needed(&self, mage: &magequery_core::Magento, release: &Path) -> Result<bool> {
+        match mage.config_status() {
+            Ok(status) => {
+                for s in status.sections.iter().filter(|s| s.changed) {
+                    eprintln!(
+                        "agent: config-status: {} changed since the last import",
+                        s.name
+                    );
+                }
+                return Ok(status.import_required());
+            }
+            Err(e) => eprintln!("agent: config-status: {e}; asking bin/magento instead"),
+        }
         let status = Command::new(&self.d().php)
             .arg(release.join("bin/magento"))
             .arg("app:config:status")
@@ -475,8 +490,7 @@ fn extract(input: &mut impl Read, len: u64, format: ArtifactFormat, dest: &Path)
     Ok(())
 }
 
-fn db_upgrade_needed(release: &Path) -> Result<bool> {
-    let mage = magequery_core::Magento::open(release).map_err(|e| anyhow!(e))?;
+fn db_upgrade_needed(mage: &magequery_core::Magento) -> Result<bool> {
     let status = mage.db_status().map_err(|e| anyhow!(e))?;
     for e in &status.errors {
         eprintln!("agent: db-status: {e}");

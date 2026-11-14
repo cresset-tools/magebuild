@@ -5,6 +5,7 @@
 //! with each step a linked in-process engine call where one exists.
 
 mod config;
+mod configstatus;
 mod dbstatus;
 mod deploy;
 mod graph;
@@ -97,6 +98,10 @@ enum Command {
     /// `bin/magento setup:db:status`. Exits 0 when up to date, 2 when an upgrade
     /// is required, 1 on error.
     DbStatus,
+    /// Whether `app:config:import` has work to do, as `bin/magento
+    /// app:config:status` decides it, without booting Magento: exits 2 when an
+    /// import is needed.
+    ConfigStatus,
     /// Ship a built artifact to the `[deploy]` host: one ssh session, a small
     /// agent on the host (uploaded only when that build is not there yet)
     /// doing the release, shared links, upgrade check, swap and cleanup.
@@ -138,6 +143,9 @@ fn run() -> Result<ExitCode> {
     // Not a build: no magebuild.toml, no graph.
     if matches!(cli.command, Some(Command::DbStatus)) {
         return dbstatus::run(&root, cli.json);
+    }
+    if matches!(cli.command, Some(Command::ConfigStatus)) {
+        return configstatus::run(&root, cli.json);
     }
     if matches!(cli.command, Some(Command::Agent)) {
         return Ok(deploy::agent::run());
