@@ -182,8 +182,10 @@ impl<'o, W: Write> Deploy<'o, W> {
             fs::create_dir_all(self.root.join(dir))?;
         }
         self._lock = Some(lock(&self.root)?);
-        // Last deploy's pruned releases go while this one streams.
-        let trash = spawn_trash_cleanup(self.root.join("releases"));
+        // Pruned releases whose cleanup did not finish (it was killed, or the
+        // host has no detached processes) go while this one streams.
+        let releases = self.root.join("releases");
+        std::thread::spawn(move || delete_trash(&releases));
 
         let name = self.next_release_name()?;
         let release = self.root.join("releases").join(&name);
@@ -389,7 +391,9 @@ impl<'o, W: Write> Deploy<'o, W> {
         self.step("finish", t, Some(notes.join("; ")))?;
         resumed.context("resuming cron after the swap")?;
 
-        let _ = trash.join();
+        // Deleting a release takes seconds, so it happens after the agent
+        // exits, in a process of its own.
+        spawn_detached_cleanup(&self.root.join("releases"));
         protocol::send(
             self.out,
             &Event::Done {
@@ -580,19 +584,38 @@ fn store_manifest(root: &Path, release: &str, entries: &[Entry]) -> Result<()> {
     Ok(())
 }
 
-fn spawn_trash_cleanup(releases: PathBuf) -> std::thread::JoinHandle<()> {
-    std::thread::spawn(move || {
-        let Ok(entries) = fs::read_dir(&releases) else {
-            return;
-        };
-        for e in entries.flatten() {
-            if e.file_name().to_string_lossy().starts_with(".trash-")
-                && let Err(err) = fs::remove_dir_all(e.path())
-            {
-                eprintln!("agent: could not delete {}: {err}", e.path().display());
-            }
+/// Delete the releases set aside as `.trash-<name>`. Another cleanup may be
+/// deleting the same ones, so a missing file is not an error.
+pub fn delete_trash(releases: &Path) {
+    let Ok(entries) = fs::read_dir(releases) else {
+        return;
+    };
+    for e in entries.flatten() {
+        if e.file_name().to_string_lossy().starts_with(".trash-")
+            && let Err(err) = fs::remove_dir_all(e.path())
+            && err.kind() != std::io::ErrorKind::NotFound
+        {
+            eprintln!("agent: could not delete {}: {err}", e.path().display());
         }
-    })
+    }
+}
+
+/// `magebuild agent-cleanup` in its own process group with no stdio, so the ssh
+/// session closes as soon as the agent exits. If the host kills it with the
+/// session anyway, the next deploy finishes the job.
+fn spawn_detached_cleanup(releases: &Path) {
+    use std::os::unix::process::CommandExt;
+    let spawned = Command::new("/proc/self/exe")
+        .arg("agent-cleanup")
+        .arg(releases)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .process_group(0)
+        .spawn();
+    if let Err(e) = spawned {
+        eprintln!("agent: could not start the cleanup of old releases: {e}");
+    }
 }
 
 fn extract(input: &mut impl Read, len: u64, format: ArtifactFormat, dest: &Path) -> Result<()> {

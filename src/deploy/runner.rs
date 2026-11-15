@@ -49,21 +49,16 @@ pub fn run(mut deploy: DeploySection, opts: Options) -> Result<ExitCode> {
     let artifact_len = std::fs::metadata(&opts.artifact)
         .with_context(|| format!("reading {}", opts.artifact.display()))?
         .len();
-    let t = Instant::now();
-    let entries = manifest::from_artifact(&opts.artifact, format)?;
-    let manifest_bytes = entries.as_deref().map(manifest::encode).transpose()?;
-    match (&entries, &manifest_bytes) {
-        (Some(e), Some(b)) => eprintln!(
-            "  manifest: {} entries, {:.1} MB, in {:.1}s",
-            e.len(),
-            b.len() as f64 / 1e6,
-            t.elapsed().as_secs_f64()
-        ),
-        _ => {
-            eprintln!("  manifest: the artifact has entries it cannot describe; sending all of it")
-        }
-    }
-
+    // Read the manifest while ssh connects.
+    let reading = {
+        let artifact = opts.artifact.clone();
+        std::thread::spawn(move || -> Result<_> {
+            let t = Instant::now();
+            let entries = manifest::from_artifact(&artifact, format)?;
+            let bytes = entries.as_deref().map(manifest::encode).transpose()?;
+            Ok((entries, bytes, t.elapsed()))
+        })
+    };
     let mut ssh = opts.ssh.split_whitespace();
     let program = ssh.next().context("--ssh is empty")?;
     let mut child = Command::new(program)
@@ -119,6 +114,21 @@ pub fn run(mut deploy: DeploySection, opts: Options) -> Result<ExitCode> {
                 "the agent on the host does not match {} (sha256 {sha256})",
                 agent_path.display()
             );
+        }
+
+        let (entries, manifest_bytes, took) = reading
+            .join()
+            .map_err(|_| anyhow::anyhow!("reading the manifest panicked"))??;
+        match (&entries, &manifest_bytes) {
+            (Some(e), Some(b)) => eprintln!(
+                "  manifest: {} entries, {:.1} MB, in {:.1}s",
+                e.len(),
+                b.len() as f64 / 1e6,
+                took.as_secs_f64()
+            ),
+            _ => eprintln!(
+                "  manifest: the artifact has entries it cannot describe; sending all of it"
+            ),
         }
 
         protocol::send(

@@ -131,6 +131,9 @@ enum Command {
     /// protocol on stdin/stdout.
     #[command(hide = true)]
     Agent,
+    /// Deletes the releases a deploy set aside, after the agent has exited.
+    #[command(hide = true)]
+    AgentCleanup { releases: PathBuf },
 }
 
 fn main() -> ExitCode {
@@ -162,6 +165,10 @@ fn run() -> Result<ExitCode> {
     }
     if matches!(cli.command, Some(Command::Agent)) {
         return Ok(deploy::agent::run());
+    }
+    if let Some(Command::AgentCleanup { releases }) = &cli.command {
+        deploy::agent::delete_trash(releases);
+        return Ok(ExitCode::SUCCESS);
     }
 
     let config_path = cli
