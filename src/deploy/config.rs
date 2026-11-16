@@ -73,6 +73,13 @@ pub struct DeploySection {
     /// import they call for. `check` only reports what would run.
     #[serde(default)]
     pub upgrade: UpgradeMode,
+    /// When the store goes into maintenance for an upgrade. `always`: for the
+    /// whole upgrade. `when-needed`: schema changes the old code can live with
+    /// (added columns, indexes and tables, longer varchars) are applied with
+    /// the store open, and maintenance covers only what remains (patches,
+    /// old-style setup scripts, a config import, other schema changes).
+    #[serde(default)]
+    pub maintenance: MaintenanceMode,
     /// How files unchanged since the live release get into the new one.
     #[serde(default)]
     pub reuse: Reuse,
@@ -127,6 +134,14 @@ pub struct Opcache {
     pub fastcgi: String,
     /// A directory php-fpm sees at the same path, for the one-line reset script.
     pub tmp_dir: String,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MaintenanceMode {
+    #[default]
+    Always,
+    WhenNeeded,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
@@ -219,6 +234,7 @@ mod tests {
         assert_eq!(d.shared_files, ["app/etc/env.php", "var/.maintenance.ip"]);
         assert!(matches!(d.cron, Cron::None));
         assert_eq!(d.upgrade, UpgradeMode::Auto);
+        assert_eq!(d.maintenance, MaintenanceMode::Always);
         assert_eq!(d.reuse, Reuse::Hardlink);
         d.validate().unwrap();
     }
@@ -242,6 +258,12 @@ mod tests {
         assert_eq!(stop, &["a.timer", "a.service"]);
         assert!(kill_stragglers);
         assert!(d.env_php.as_ref().unwrap().roll_cache_prefix);
+    }
+
+    #[test]
+    fn maintenance_when_needed() {
+        let d = parse("host = 'm@h'\npath = '/srv/shop'\nmaintenance = 'when-needed'");
+        assert_eq!(d.maintenance, MaintenanceMode::WhenNeeded);
     }
 
     #[test]

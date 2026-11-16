@@ -17,7 +17,7 @@ use std::time::Instant;
 use anyhow::{Context, Result, anyhow, bail};
 use sha2::{Digest, Sha256};
 
-use super::config::{DeploySection, UpgradeMode};
+use super::config::{DeploySection, MaintenanceMode, UpgradeMode};
 use super::manifest::{self, Entry};
 use super::protocol::{self, ArtifactFormat, Data, Event, Need, PROTOCOL, Plan};
 use super::{cron, envphp, fcgi, redis, session};
@@ -326,7 +326,11 @@ impl<'o, W: Write> Deploy<'o, W> {
 
         let t = Instant::now();
         let mage = magequery_core::Magento::open(&release).map_err(|e| anyhow!(e))?;
-        let (schema_or_patches, mut maintenance) = db_upgrade_needed(&mage)?;
+        let DbCheck {
+            needed: schema_or_patches,
+            mut maintenance,
+            online_schema,
+        } = db_upgrade_needed(&mage)?;
         let config_import = self.config_import_needed(&mage, &release)?;
         let registration = registration_needed(&mage);
         self.amqp_fingerprint = registration.amqp_fingerprint.clone();
@@ -357,10 +361,8 @@ impl<'o, W: Write> Deploy<'o, W> {
         } else {
             format!("{} needed", parts.join(", "))
         };
-        // Report only for now: the upgrade below still always runs in
-        // maintenance. Theme registration and queue setup only add rows and
-        // queues, so they don't count; a config import changes what the live
-        // code reads.
+        // Theme registration and queue setup only add rows and queues, so
+        // they don't count; a config import changes what the live code reads.
         if config_import {
             maintenance.push("config import".into());
         }
@@ -388,20 +390,50 @@ impl<'o, W: Write> Deploy<'o, W> {
         self.cron_paused = true;
         self.step("cron-stop", t, None)?;
 
+        // With `maintenance = "when-needed"`, schema changes the old code can
+        // live with go first with the store open. When nothing else needs
+        // maintenance, the rest of the upgrade (recurring setup scripts, which
+        // the check doesn't judge) runs with it open too. After a failed
+        // upgrade the store is in maintenance anyway, so this is skipped.
+        let when_needed = self.d().maintenance == MaintenanceMode::WhenNeeded
+            && !self.failed_upgrade_pending
+            && (db_upgrade || config_import);
+        let mut open = when_needed && maintenance.is_empty();
+        let mut schema_done = false;
+        if when_needed && let Some(expected) = &online_schema {
+            let t = Instant::now();
+            magento(&self.d().php, &release, &["cache:clean", "config"])?;
+            let applied = schema_upgrade(&self.d().php, &self.root, &release, expected).context(
+                "applying the schema changes with the store open failed; those \
+                     already applied only add to the schema, so the live code keeps \
+                     working on it",
+            )?;
+            let detail = if applied {
+                schema_done = true;
+                format!("{} change(s) applied with the store open", expected.len())
+            } else {
+                open = false;
+                "Magento's schema diff is not the one checked; left to the upgrade".into()
+            };
+            self.step("schema", t, Some(detail))?;
+        }
+
         if db_upgrade || config_import {
             let t = Instant::now();
-            // Both releases: the live one for the upgrade, the new one so it
-            // comes up in maintenance at the swap and opens only once opcache
-            // is reset. Through a shared var/ these are the same flag.
-            if self.root.join("current").exists() {
-                set_maintenance_flag(&self.root.join("current"))?;
-                self.maintenance_on = true;
-                set_maintenance_flag(&release)?;
+            if !open {
+                // Both releases: the live one for the upgrade, the new one so it
+                // comes up in maintenance at the swap and opens only once opcache
+                // is reset. Through a shared var/ these are the same flag.
+                if self.root.join("current").exists() {
+                    set_maintenance_flag(&self.root.join("current"))?;
+                    self.maintenance_on = true;
+                    set_maintenance_flag(&release)?;
+                }
+                // Past here stopping halfway is worse than finishing, so a lost
+                // runner no longer stops the deploy.
+                session::commit();
+                self.upgrade_started = true;
             }
-            // Past here stopping halfway is worse than finishing, so a lost
-            // runner no longer stops the deploy.
-            session::commit();
-            self.upgrade_started = true;
             if config_import {
                 magento(
                     &self.d().php,
@@ -410,7 +442,9 @@ impl<'o, W: Write> Deploy<'o, W> {
                 )?;
             }
             if db_upgrade {
-                magento(&self.d().php, &release, &["cache:clean", "config"])?;
+                if !schema_done {
+                    magento(&self.d().php, &release, &["cache:clean", "config"])?;
+                }
                 magento(
                     &self.d().php,
                     &release,
@@ -422,7 +456,12 @@ impl<'o, W: Write> Deploy<'o, W> {
                     &["setup:db-data:upgrade", "--no-interaction"],
                 )?;
             }
-            self.step("upgrade", t, None)?;
+            let how = if open {
+                "with the store open"
+            } else {
+                "in maintenance"
+            };
+            self.step("upgrade", t, Some(how.into()))?;
         }
 
         let t = Instant::now();
@@ -808,14 +847,73 @@ fn registration_needed(mage: &magequery_core::Magento) -> Registration {
     }
 }
 
-/// Whether the database needs an upgrade, and what in it would need
-/// maintenance mode (empty when all of it could run online).
-fn db_upgrade_needed(mage: &magequery_core::Magento) -> Result<(bool, Vec<String>)> {
+struct DbCheck {
+    needed: bool,
+    /// What in the upgrade needs maintenance; empty when all of it could run
+    /// with the store open.
+    maintenance: Vec<String>,
+    /// The declarative schema changes as `<operation> <table>[.<element>]`,
+    /// when there are some and every one can be applied with the store open.
+    online_schema: Option<Vec<String>>,
+}
+
+fn db_upgrade_needed(mage: &magequery_core::Magento) -> Result<DbCheck> {
+    use magequery_core::model::Online;
     let status = mage.db_status().map_err(|e| anyhow!(e))?;
     for e in &status.errors {
         eprintln!("agent: db-status: {e}");
     }
-    Ok((!status.is_up_to_date(), status.maintenance_reasons()))
+    let changes = &status.schema_changes;
+    let online_schema = (!changes.is_empty()
+        && status.errors.is_empty()
+        && changes.iter().all(|c| c.online != Online::No))
+    .then(|| {
+        changes
+            .iter()
+            .map(|c| match &c.element {
+                Some(e) => format!("{} {}.{e}", c.operation, c.table),
+                None => format!("{} {}", c.operation, c.table),
+            })
+            .collect()
+    });
+    Ok(DbCheck {
+        needed: !status.is_up_to_date(),
+        maintenance: status.maintenance_reasons(),
+        online_schema,
+    })
+}
+
+/// Applies only Magento's declarative schema diff, and only when it is exactly
+/// `expected`: a PHP script that refuses when Magento's diff differs from what
+/// magequery classified, so nothing unchecked runs with the store open.
+const SCHEMA_UPGRADE_PHP: &str = include_str!("schema-upgrade.php");
+
+/// `Ok(true)` when the changes were applied, `Ok(false)` when Magento's diff
+/// differs and nothing was changed.
+fn schema_upgrade(php: &str, root: &Path, release: &Path, expected: &[String]) -> Result<bool> {
+    let script = root.join(".dep/magebuild-schema-upgrade.php");
+    fs::write(&script, SCHEMA_UPGRADE_PHP)
+        .with_context(|| format!("writing {}", script.display()))?;
+    eprintln!("agent: schema-upgrade.php ({} change(s))", expected.len());
+    let mut child = Command::new(php)
+        .arg(&script)
+        .arg(release)
+        .current_dir(release)
+        .stdin(Stdio::piped())
+        .stdout(stderr_stdio())
+        .spawn()
+        .with_context(|| format!("running {php} {}", script.display()))?;
+    child
+        .stdin
+        .take()
+        .expect("stdin is piped")
+        .write_all(expected.join("\n").as_bytes())?;
+    let status = child.wait()?;
+    match status.code() {
+        Some(0) => Ok(true),
+        Some(3) => Ok(false),
+        _ => bail!("schema-upgrade.php exited with {status}"),
+    }
 }
 
 /// Magento's maintenance switch: `MaintenanceMode::FLAG_FILENAME` in `VAR_DIR`.

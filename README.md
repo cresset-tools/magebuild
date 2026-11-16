@@ -270,7 +270,8 @@ at a time, so a deploy costs one round trip instead of about a hundred:
    topology fingerprint below), asking `bin/magento app:config:status` only when
    the config holds something the native check can't hash exactly;
 5. pauses cron, runs the import or upgrade only when needed (maintenance mode on
-   the live release meanwhile), then swaps `current` atomically. Maintenance
+   the live release meanwhile, or with `maintenance = "when-needed"` only for
+   the part that needs it; see "Upgrading with the store open"), then swaps `current` atomically. Maintenance
    stays on through the swap, so the old code never serves the upgraded
    database: the flag is set in both the live and the new release, and after
    the swap and the opcache reset only the new release's is cleared. The old
@@ -306,6 +307,7 @@ php = "/usr/bin/php8.4"
 shared_files = ["var/.maintenance.ip"]          # env.php is derived, below
 links = { "auth.json" = "shared/auth.json" }    # linked, never touched
 keep_releases = 5
+maintenance = "when-needed"                     # default "always"; see below
 
 [deploy.env_php]
 source = "shared/app/etc/env.php"               # rolls cache/frontend/*/id_prefix to r<N>_
@@ -319,6 +321,28 @@ start = ["magento-cron.timer"]
 fastcgi = "127.0.0.1:9000"                      # or a socket path
 tmp_dir = "/var/www/tmp"                        # a dir php-fpm sees at the same path
 ```
+
+### Upgrading with the store open
+
+With `maintenance = "when-needed"`, the check also judges each declarative
+schema change (see `magebuild db-status`): whether code written for the old
+schema keeps working on the new one, and whether the server applies it without
+blocking writes. Added nullable columns, added indexes, new tables and longer
+varchars pass; dropped or renamed columns and tables, NOT NULL columns without
+a default, narrower types and unique or foreign keys don't. When every schema
+change passes, the agent applies just the schema changes before maintenance,
+with a small PHP script that computes Magento's own diff and runs it only if it
+is exactly the list that was checked (otherwise nothing changes and the
+upgrade runs in maintenance as usual). Maintenance then covers only what is
+left: schema and data patches, old-style setup scripts, a config import, or a
+schema change that did not pass. When nothing is left, the whole upgrade runs
+with the store open. Recurring setup scripts are not judged; they run with the
+rest of the upgrade.
+
+If applying the schema changes with the store open fails, the deploy stops
+without maintenance: what was applied only adds to the schema, so the live
+code keeps working, and the next deploy applies the rest. The default,
+`maintenance = "always"`, keeps the store in maintenance for the whole upgrade.
 
 ### Sending only what changed
 
