@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.12.2](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.12.1...magebuild-v0.12.2) (2026-11-16)
+
+
+### Bug Fixes
+
+* **magebuild:** build the agent on macOS again ([dcd3d7a](https://github.com/cresset-tools/magebuild/commit/dcd3d7a11593b1172a57cce7c74885a86e1ae6aa))
+* **magebuild:** finish a committed deploy when the runner goes away ([52a586a](https://github.com/cresset-tools/magebuild/commit/52a586aa436a57b4f9a95d34c551f6e3c0648493))
+* **magebuild:** keep maintenance on until the swap, and set it natively ([bed4788](https://github.com/cresset-tools/magebuild/commit/bed4788d4a059938e958134d37dd507f745c10ea))
+
 ## [0.12.1](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.12.0...magebuild-v0.12.1) (2026-11-16)
 
 
