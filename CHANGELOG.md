@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.12.2...magebuild-v0.13.0) (2026-11-16)
+
+
+### Features
+
+* **magebuild:** report whether a deploy's upgrade needs maintenance ([749e1bf](https://github.com/cresset-tools/magebuild/commit/749e1bfb37b22b56d66a8f42722bfb4da09b8b58))
+
 ## [0.12.2](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.12.1...magebuild-v0.12.2) (2026-11-16)
 
 
