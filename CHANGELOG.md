@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.12.1](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.12.0...magebuild-v0.12.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **magebuild:** update locked dependencies ([a097b76](https://github.com/cresset-tools/magebuild/commit/a097b765ddec0e54f5fc16467d1275bbeb30ad79))
+
+
+### Performance Improvements
+
+* **magebuild:** delete old releases after the deploy returns ([ff39551](https://github.com/cresset-tools/magebuild/commit/ff395515719db89c87f57fb2020f5ae1a58a8132))
+
 ## [0.12.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.11.0...magebuild-v0.12.0) (2026-11-14)
 
 
