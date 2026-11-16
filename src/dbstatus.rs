@@ -55,6 +55,8 @@ fn render(status: &DbStatus, root: &Path) -> String {
             for d in &c.detail {
                 let _ = writeln!(out, "  {:<20} {d}", "");
             }
+            let rows = c.rows.map(|n| format!(", ~{n} rows")).unwrap_or_default();
+            let _ = writeln!(out, "  {:<20} {}: {}{rows}", "", c.online, c.why);
         }
         out.push('\n');
     }
@@ -95,6 +97,17 @@ fn render(status: &DbStatus, root: &Path) -> String {
     if status.is_up_to_date() {
         out.push_str("All modules are up to date.\n");
     } else {
+        let reasons = status.maintenance_reasons();
+        if reasons.is_empty() {
+            out.push_str(
+                "The upgrade could run without maintenance mode (recurring setup scripts not counted).\n",
+            );
+        } else {
+            out.push_str("The upgrade needs maintenance mode:\n");
+            for r in &reasons {
+                let _ = writeln!(out, "  {r}");
+            }
+        }
         out.push_str("Run 'setup:upgrade' to update your DB schema and data.\n");
     }
     out

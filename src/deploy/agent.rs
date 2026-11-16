@@ -326,7 +326,7 @@ impl<'o, W: Write> Deploy<'o, W> {
 
         let t = Instant::now();
         let mage = magequery_core::Magento::open(&release).map_err(|e| anyhow!(e))?;
-        let schema_or_patches = db_upgrade_needed(&mage)?;
+        let (schema_or_patches, mut maintenance) = db_upgrade_needed(&mage)?;
         let config_import = self.config_import_needed(&mage, &release)?;
         let registration = registration_needed(&mage);
         self.amqp_fingerprint = registration.amqp_fingerprint.clone();
@@ -357,7 +357,28 @@ impl<'o, W: Write> Deploy<'o, W> {
         } else {
             format!("{} needed", parts.join(", "))
         };
-        self.step("check", t, Some(needs.clone()))?;
+        // Report only for now: the upgrade below still always runs in
+        // maintenance. Theme registration and queue setup only add rows and
+        // queues, so they don't count; a config import changes what the live
+        // code reads.
+        if config_import {
+            maintenance.push("config import".into());
+        }
+        let mut detail = needs.clone();
+        if db_upgrade || config_import {
+            if maintenance.is_empty() {
+                detail.push_str(
+                    "\ncould run without maintenance (recurring setup scripts not counted)",
+                );
+            } else {
+                detail.push_str("\nneeds maintenance:");
+                for r in &maintenance {
+                    detail.push_str("\n  ");
+                    detail.push_str(r);
+                }
+            }
+        }
+        self.step("check", t, Some(detail))?;
 
         if self.d().upgrade == UpgradeMode::Check && (db_upgrade || config_import) {
             bail!("{needs}, but [deploy] upgrade = \"check\" never runs it; not swapping");
@@ -787,12 +808,14 @@ fn registration_needed(mage: &magequery_core::Magento) -> Registration {
     }
 }
 
-fn db_upgrade_needed(mage: &magequery_core::Magento) -> Result<bool> {
+/// Whether the database needs an upgrade, and what in it would need
+/// maintenance mode (empty when all of it could run online).
+fn db_upgrade_needed(mage: &magequery_core::Magento) -> Result<(bool, Vec<String>)> {
     let status = mage.db_status().map_err(|e| anyhow!(e))?;
     for e in &status.errors {
         eprintln!("agent: db-status: {e}");
     }
-    Ok(!status.is_up_to_date())
+    Ok((!status.is_up_to_date(), status.maintenance_reasons()))
 }
 
 /// Magento's maintenance switch: `MaintenanceMode::FLAG_FILENAME` in `VAR_DIR`.

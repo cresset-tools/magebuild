@@ -191,7 +191,12 @@ pub fn run(mut deploy: DeploySection, opts: Options) -> Result<ExitCode> {
                     release = r;
                 }
                 Event::Step { name, ms, detail } => match detail {
-                    Some(d) => eprintln!("✓ {name:<16} {:>6.2}s  {d}", ms as f64 / 1000.0),
+                    // Further lines of a detail line up under its first.
+                    Some(d) => eprintln!(
+                        "✓ {name:<16} {:>6.2}s  {}",
+                        ms as f64 / 1000.0,
+                        d.replace('\n', &format!("\n{:28}", ""))
+                    ),
                     None => eprintln!("✓ {name:<16} {:>6.2}s", ms as f64 / 1000.0),
                 },
                 Event::Done { release: r, .. } => return Ok(r),
