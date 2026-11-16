@@ -270,7 +270,21 @@ at a time, so a deploy costs one round trip instead of about a hundred:
    topology fingerprint below), asking `bin/magento app:config:status` only when
    the config holds something the native check can't hash exactly;
 5. pauses cron, runs the import or upgrade only when needed (maintenance mode on
-   the live release meanwhile), then swaps `current` atomically;
+   the live release meanwhile), then swaps `current` atomically. Maintenance
+   stays on through the swap, so the old code never serves the upgraded
+   database: the flag is set in both the live and the new release, and after
+   the swap and the opcache reset only the new release's is cleared. The old
+   release keeps its flag, so rolling back to it after an upgrade comes up in
+   maintenance until you run `maintenance:disable` there. If the live release
+   was already in maintenance before the deploy, the new one inherits it and
+   the deploy leaves it on. If an import or upgrade fails partway, the database
+   may match neither release, so the agent fails closed: maintenance stays on,
+   cron stays stopped, and `.dep/upgrade-failed` tells the next deploy to
+   clear that flag once it gets through. The agent sets and clears `var/.maintenance.flag` itself, exactly as
+   `maintenance:enable`/`disable` do, without booting PHP. Like Deployer's
+   recipe, share `var/.maintenance.ip` but not the flag: a missing shared file
+   is created empty, which is maintenance on, and Magento's disable deletes the
+   link rather than the shared file;
 6. resets opcache over FastCGI, deletes the previous release's cache keys,
    resumes cron, and sets old releases aside for the next deploy to delete
    while it uploads.
