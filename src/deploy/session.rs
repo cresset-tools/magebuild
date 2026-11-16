@@ -46,8 +46,12 @@ pub fn detach() {
     unsafe {
         libc::signal(libc::SIGHUP, libc::SIG_IGN);
         let mut fds = [0; 2];
-        if libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) != 0 {
+        // pipe + FD_CLOEXEC rather than pipe2, which macOS lacks.
+        if libc::pipe(fds.as_mut_ptr()) != 0 {
             return;
+        }
+        for fd in fds {
+            libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC);
         }
         let original = libc::fcntl(2, libc::F_DUPFD_CLOEXEC, 3);
         if original < 0 || libc::dup2(fds[1], 2) < 0 {
