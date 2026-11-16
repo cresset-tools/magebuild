@@ -20,7 +20,7 @@ use sha2::{Digest, Sha256};
 use super::config::{DeploySection, UpgradeMode};
 use super::manifest::{self, Entry};
 use super::protocol::{self, ArtifactFormat, Data, Event, Need, PROTOCOL, Plan};
-use super::{cron, envphp, fcgi, redis};
+use super::{cron, envphp, fcgi, redis, session};
 
 /// A child process's stdout, pointed at our stderr: stdout is the protocol.
 pub fn stderr_stdio() -> Stdio {
@@ -32,10 +32,11 @@ pub fn stderr_stdio() -> Stdio {
 }
 
 pub fn run() -> ExitCode {
+    session::detach();
     let stdin = std::io::stdin();
     let mut input = BufReader::new(stdin.lock());
-    let mut out = std::io::stdout().lock();
-    match serve(&mut input, &mut out) {
+    let mut out = session::ToRunner(std::io::stdout().lock());
+    let code = match serve(&mut input, &mut out) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("agent: {e:#}");
@@ -47,7 +48,9 @@ pub fn run() -> ExitCode {
             );
             ExitCode::FAILURE
         }
-    }
+    };
+    session::finish();
+    code
 }
 
 fn serve(input: &mut impl BufRead, out: &mut impl Write) -> Result<()> {
@@ -103,6 +106,17 @@ struct Deploy<'o, W: Write> {
     release: Option<(String, PathBuf)>,
     cron_paused: bool,
     maintenance_on: bool,
+    /// The live release was in maintenance before the deploy (someone put it
+    /// there): the new release inherits it and the deploy never ends it.
+    kept_maintenance: bool,
+    /// An import or upgrade command has run. DDL commits as it goes, so after a
+    /// failure from here the database may be half upgraded: the store stays in
+    /// maintenance with cron stopped instead of reopening on the old code.
+    upgrade_started: bool,
+    /// An earlier deploy's upgrade failed partway (`UPGRADE_FAILED` exists): the
+    /// maintenance flag is ours, not someone's, and stays on until a deploy
+    /// gets through.
+    failed_upgrade_pending: bool,
     /// The incoming release's AMQP topology fingerprint, recorded at the swap.
     amqp_fingerprint: Option<String>,
     /// The incoming release's manifest, from the runner.
@@ -121,6 +135,9 @@ impl<'o, W: Write> Deploy<'o, W> {
             release: None,
             cron_paused: false,
             maintenance_on: false,
+            kept_maintenance: false,
+            upgrade_started: false,
+            failed_upgrade_pending: false,
             amqp_fingerprint: None,
             manifest: None,
             _lock: None,
@@ -132,6 +149,11 @@ impl<'o, W: Write> Deploy<'o, W> {
     }
 
     fn step(&mut self, name: &str, since: Instant, detail: Option<String>) -> Result<()> {
+        session::log_line(&format!(
+            "step {name} {}ms {}",
+            since.elapsed().as_millis(),
+            detail.as_deref().unwrap_or("")
+        ));
         protocol::send(
             self.out,
             &Event::Step {
@@ -147,6 +169,24 @@ impl<'o, W: Write> Deploy<'o, W> {
             Ok(()) => Ok(()),
             Err(e) => {
                 self.undo();
+                if self.upgrade_started {
+                    if let Err(m) = fs::write(self.root.join(UPGRADE_FAILED), "") {
+                        eprintln!("agent: could not record the failed upgrade: {m}");
+                    }
+                    return Err(e.context(
+                        "the upgrade failed partway, so the database may not match \
+                         either release: maintenance stays on and cron stays stopped. \
+                         Fix the cause and deploy again; or, once the database matches \
+                         the live code, run `bin/magento maintenance:disable` in \
+                         current and start cron",
+                    ));
+                }
+                if self.failed_upgrade_pending {
+                    return Err(e.context(
+                        "an earlier upgrade failed partway and this deploy did not get \
+                         through either: maintenance stays on",
+                    ));
+                }
                 Err(e)
             }
         }
@@ -154,13 +194,19 @@ impl<'o, W: Write> Deploy<'o, W> {
 
     /// Put the store back the way it was: the swap has not happened yet, so the
     /// live release is untouched; only the deploy's side effects need undoing.
+    /// Once the upgrade has started there is no way back, so maintenance and
+    /// cron are left as they are.
     fn undo(&mut self) {
-        if self.maintenance_on
-            && let Err(e) = self.magento_current(&["maintenance:disable"])
+        let reopen = !self.upgrade_started && !self.failed_upgrade_pending;
+        if reopen
+            && self.maintenance_on
+            && !self.kept_maintenance
+            && let Err(e) = clear_maintenance_flag(&self.root.join("current"))
         {
             eprintln!("agent: could not disable maintenance mode: {e:#}");
         }
-        if self.cron_paused
+        if reopen
+            && self.cron_paused
             && let Err(e) = cron::start(&self.plan.deploy.cron)
         {
             eprintln!("agent: could not resume cron: {e:#}");
@@ -182,6 +228,7 @@ impl<'o, W: Write> Deploy<'o, W> {
             fs::create_dir_all(self.root.join(dir))?;
         }
         self._lock = Some(lock(&self.root)?);
+        session::open_log(&self.root);
         // Pruned releases whose cleanup did not finish (it was killed, or the
         // host has no detached processes) go while this one streams.
         let releases = self.root.join("releases");
@@ -195,6 +242,14 @@ impl<'o, W: Write> Deploy<'o, W> {
         let previous = fs::read_link(self.root.join("current"))
             .ok()
             .map(|l| self.root.join(l));
+        // Read before this deploy sets any flag. `exists()` follows links,
+        // like Magento's `file_exists()`.
+        self.failed_upgrade_pending = self.root.join(UPGRADE_FAILED).exists();
+        self.maintenance_on = self.failed_upgrade_pending;
+        self.kept_maintenance = !self.failed_upgrade_pending
+            && previous
+                .as_ref()
+                .is_some_and(|p| p.join(MAINTENANCE_FLAG).exists());
         self.step("prepare", t, None)?;
 
         // Link (or copy) whatever the live release already has, and ask for the rest.
@@ -314,10 +369,18 @@ impl<'o, W: Write> Deploy<'o, W> {
 
         if db_upgrade || config_import {
             let t = Instant::now();
+            // Both releases: the live one for the upgrade, the new one so it
+            // comes up in maintenance at the swap and opens only once opcache
+            // is reset. Through a shared var/ these are the same flag.
             if self.root.join("current").exists() {
-                self.magento_current(&["maintenance:enable"])?;
+                set_maintenance_flag(&self.root.join("current"))?;
                 self.maintenance_on = true;
+                set_maintenance_flag(&release)?;
             }
+            // Past here stopping halfway is worse than finishing, so a lost
+            // runner no longer stops the deploy.
+            session::commit();
+            self.upgrade_started = true;
             if config_import {
                 magento(
                     &self.d().php,
@@ -338,14 +401,16 @@ impl<'o, W: Write> Deploy<'o, W> {
                     &["setup:db-data:upgrade", "--no-interaction"],
                 )?;
             }
-            if self.maintenance_on {
-                self.magento_current(&["maintenance:disable"])?;
-                self.maintenance_on = false;
-            }
             self.step("upgrade", t, None)?;
         }
 
         let t = Instant::now();
+        // Maintenance someone switched on stays on: the new release comes up
+        // in it too, even when this deploy had nothing to upgrade.
+        session::commit();
+        if self.kept_maintenance || self.maintenance_on {
+            set_maintenance_flag(&release)?;
+        }
         swap(&self.root, &name)?;
         // Past the swap there is nothing to roll back: the new release is live.
         self.release = None;
@@ -373,6 +438,24 @@ impl<'o, W: Write> Deploy<'o, W> {
         {
             notes.push(format!("opcache reset failed: {e:#}"));
         }
+        // Maintenance stayed on through the swap, so the old code never served
+        // the upgraded database; this ends it. Only the new release's flag:
+        // the old release keeps its own, so a rollback to code that may not
+        // match the upgraded database comes up in maintenance until someone
+        // runs `maintenance:disable` there.
+        if self.kept_maintenance {
+            notes.push("maintenance was on before the deploy and stays on".into());
+        } else if self.maintenance_on
+            && let Err(e) = clear_maintenance_flag(&release)
+        {
+            notes.push(format!("clearing maintenance mode failed: {e:#}"));
+        }
+        self.maintenance_on = false;
+        if self.failed_upgrade_pending
+            && let Err(e) = fs::remove_file(self.root.join(UPGRADE_FAILED))
+        {
+            notes.push(format!("clearing the failed-upgrade marker failed: {e}"));
+        }
         if let Some(prev) = &previous {
             match retire_cache_prefixes(prev, &release) {
                 Ok(n) => notes.push(format!("{n} old cache keys deleted")),
@@ -394,6 +477,15 @@ impl<'o, W: Write> Deploy<'o, W> {
         // Deleting a release takes seconds, so it happens after the agent
         // exits, in a process of its own.
         spawn_detached_cleanup(&self.root.join("releases"));
+        session::log_line(&format!(
+            "done: release {name} in {}ms{}",
+            self.started.elapsed().as_millis(),
+            if session::runner_gone() {
+                " (the runner had gone)"
+            } else {
+                ""
+            }
+        ));
         protocol::send(
             self.out,
             &Event::Done {
@@ -509,10 +601,6 @@ impl<'o, W: Write> Deploy<'o, W> {
             Some(2) => Ok(true),
             _ => bail!("bin/magento app:config:status exited with {status}"),
         }
-    }
-
-    fn magento_current(&self, args: &[&str]) -> Result<()> {
-        magento(&self.d().php, &self.root.join("current"), args)
     }
 
     /// Keep the newest `keep_releases` (the new one and the live one among
@@ -707,6 +795,43 @@ fn db_upgrade_needed(mage: &magequery_core::Magento) -> Result<bool> {
     Ok(!status.is_up_to_date())
 }
 
+/// Magento's maintenance switch: `MaintenanceMode::FLAG_FILENAME` in `VAR_DIR`.
+/// Through a shared `var/` it is the one flag every release reads.
+const MAINTENANCE_FLAG: &str = "var/.maintenance.flag";
+
+/// Written when an upgrade fails partway and the store is left in maintenance,
+/// so the next deploy knows that flag is its own to clear once it gets through.
+const UPGRADE_FAILED: &str = ".dep/upgrade-failed";
+
+/// What `bin/magento maintenance:enable` does, without booting PHP:
+/// `MaintenanceMode::set(true)` touches the flag, creating `var/` if missing
+/// (PHP's `touch()`: an empty file, mode 0666 less the umask, or a fresh mtime
+/// on one that exists). The `maintenance_mode_changed` event it also dispatches
+/// has no observer in Magento itself, so nothing is skipped there; neither
+/// command form touches `.maintenance.ip` without `--ip`.
+fn set_maintenance_flag(release: &Path) -> Result<()> {
+    let flag = release.join(MAINTENANCE_FLAG);
+    let var = flag.parent().expect("flag has a parent");
+    fs::create_dir_all(var).with_context(|| format!("creating {}", var.display()))?;
+    fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&flag)
+        .and_then(|f| f.set_modified(std::time::SystemTime::now()))
+        .with_context(|| format!("touching {}", flag.display()))
+}
+
+/// What `bin/magento maintenance:disable` does: delete the flag if it exists.
+fn clear_maintenance_flag(release: &Path) -> Result<()> {
+    let flag = release.join(MAINTENANCE_FLAG);
+    match fs::remove_file(&flag) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            Err(e).with_context(|| format!("deleting {}", flag.display()))
+        }
+        _ => Ok(()),
+    }
+}
+
 fn magento(php: &str, root: &Path, args: &[&str]) -> Result<()> {
     eprintln!("agent: bin/magento {}", args.join(" "));
     let status = Command::new(php)
@@ -830,6 +955,56 @@ fn iso8601_now() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn maintenance_flag_matches_magento_in_shared_and_own_var() {
+        let root = std::env::temp_dir().join(format!(
+            "magebuild-maint-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        // Own var/: each release has its flag, and clearing one leaves the other.
+        let (a, b) = (root.join("own/1"), root.join("own/2"));
+        for r in [&a, &b] {
+            fs::create_dir_all(r.join("var")).unwrap();
+            fs::write(r.join("var/.maintenance.flag"), "").unwrap();
+        }
+        clear_maintenance_flag(&a).unwrap();
+        assert!(!a.join("var/.maintenance.flag").exists());
+        assert!(b.join("var/.maintenance.flag").exists());
+        // Shared var/: one flag, cleared through either release; the second
+        // clear finds nothing and is fine.
+        let shared = root.join("shared/var");
+        fs::create_dir_all(&shared).unwrap();
+        fs::write(shared.join(".maintenance.flag"), "").unwrap();
+        let (c, d) = (root.join("shared-rel/1"), root.join("shared-rel/2"));
+        for r in [&c, &d] {
+            fs::create_dir_all(r).unwrap();
+            std::os::unix::fs::symlink(&shared, r.join("var")).unwrap();
+        }
+        clear_maintenance_flag(&c).unwrap();
+        clear_maintenance_flag(&d).unwrap();
+        assert!(!shared.join(".maintenance.flag").exists());
+        assert!(d.join("var").is_dir());
+        // No var/ at all.
+        clear_maintenance_flag(&root.join("missing")).unwrap();
+        // Enabling creates var/ and an empty flag, through a shared var/ too,
+        // and keeps an existing flag's contents.
+        set_maintenance_flag(&root.join("fresh")).unwrap();
+        assert_eq!(
+            fs::read(root.join("fresh/var/.maintenance.flag")).unwrap(),
+            b""
+        );
+        set_maintenance_flag(&c).unwrap();
+        assert!(shared.join(".maintenance.flag").is_file());
+        fs::write(shared.join(".maintenance.flag"), "x").unwrap();
+        set_maintenance_flag(&d).unwrap();
+        assert_eq!(fs::read(shared.join(".maintenance.flag")).unwrap(), b"x");
+        fs::remove_dir_all(&root).unwrap();
+    }
 
     #[test]
     fn relative_links_climb_out_of_the_release() {

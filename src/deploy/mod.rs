@@ -11,3 +11,4 @@ mod manifest;
 mod protocol;
 mod redis;
 pub mod runner;
+mod session;
