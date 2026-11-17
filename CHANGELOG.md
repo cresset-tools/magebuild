@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.13.0...magebuild-v0.14.0) (2026-11-17)
+
+
+### Features
+
+* **magebuild:** apply schema changes with the store open when they are safe ([7363492](https://github.com/cresset-tools/magebuild/commit/7363492d9e46df8439fa536f49c9c86905c38019))
+
 ## [0.13.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.12.2...magebuild-v0.13.0) (2026-11-16)
 
 
