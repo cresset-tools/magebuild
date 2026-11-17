@@ -318,7 +318,6 @@ impl<'o, W: Write> Deploy<'o, W> {
                 &self.root.join(&env.source),
                 &release.join("app/etc/env.php"),
                 &name,
-                env.roll_cache_prefix,
             )?;
         }
         self.make_writable(&release)?;

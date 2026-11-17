@@ -7,15 +7,13 @@ use std::path::Path;
 use anyhow::{Context, Result, anyhow};
 use magequery_core::phparray::{self, PhpValue};
 
-/// Write `target` from `template`, rolling the cache prefix when asked.
-pub fn derive(template: &Path, target: &Path, release: &str, roll_prefix: bool) -> Result<()> {
+/// Write `target` from `template`, with the cache prefix rolled to the release.
+pub fn derive(template: &Path, target: &Path, release: &str) -> Result<()> {
     let src = std::fs::read_to_string(template)
         .with_context(|| format!("reading the env.php template {}", template.display()))?;
     let mut env =
         phparray::parse(&src).map_err(|e| anyhow!("parsing {}: {e}", template.display()))?;
-    if roll_prefix {
-        set_cache_prefix(&mut env, &prefix_for(release));
-    }
+    set_cache_prefix(&mut env, &prefix_for(release));
     if let Some(dir) = target.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -136,7 +134,7 @@ return [
         let tpl = dir.join("tpl.php");
         std::fs::write(&tpl, TEMPLATE).unwrap();
         let out = dir.join("app/etc/env.php");
-        derive(&tpl, &out, "36", true).unwrap();
+        derive(&tpl, &out, "36").unwrap();
 
         let caches = redis_caches(&out).unwrap();
         assert_eq!(caches.len(), 2);
@@ -157,19 +155,6 @@ return [
         assert_eq!(
             std::fs::metadata(&out).unwrap().permissions().mode() & 0o777,
             0o440
-        );
-    }
-
-    #[test]
-    fn derive_without_rolling_copies_the_template() {
-        let dir = tempdir();
-        let tpl = dir.join("tpl.php");
-        std::fs::write(&tpl, TEMPLATE).unwrap();
-        let out = dir.join("env.php");
-        derive(&tpl, &out, "36", false).unwrap();
-        assert_eq!(
-            phparray::parse(&std::fs::read_to_string(&out).unwrap()).unwrap(),
-            phparray::parse(TEMPLATE).unwrap()
         );
     }
 

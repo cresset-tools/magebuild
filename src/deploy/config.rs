@@ -96,16 +96,15 @@ pub enum Reuse {
     Copy,
 }
 
-/// Derive env.php from `source` (relative to the deploy root), rolling the cache
-/// `id_prefix` per release so the outgoing release keeps its warm cache until
-/// the swap. The old prefix's Redis keys are deleted after the swap.
+/// Derive env.php from `source` (relative to the deploy root), rolling every
+/// cache frontend's `id_prefix` to `r<release>_` so the outgoing release keeps
+/// its warm cache until the swap. The old prefix's Redis keys are deleted after
+/// the swap. Always on: a shared prefix would let the new release's commands
+/// read and write the live release's cache before the swap.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct EnvPhp {
     pub source: String,
-    /// Roll `cache/frontend/*/id_prefix` to `r<release>_`.
-    #[serde(default = "yes")]
-    pub roll_cache_prefix: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -257,7 +256,16 @@ mod tests {
         };
         assert_eq!(stop, &["a.timer", "a.service"]);
         assert!(kill_stragglers);
-        assert!(d.env_php.as_ref().unwrap().roll_cache_prefix);
+        assert_eq!(d.env_php.unwrap().source, "shared/app/etc/env.php");
+    }
+
+    #[test]
+    fn cache_prefix_rolling_cannot_be_turned_off() {
+        let r: Result<DeploySection, _> = toml::from_str(
+            "host = 'm@h'\npath = '/srv/shop'\n\
+             [env_php]\nsource = 'shared/app/etc/env.php'\nroll_cache_prefix = false",
+        );
+        assert!(r.unwrap_err().to_string().contains("roll_cache_prefix"));
     }
 
     #[test]
