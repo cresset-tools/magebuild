@@ -1,8 +1,11 @@
 //! What a release contains, entry by entry, so a deploy sends only the files
 //! the host doesn't already have.
 //!
-//! The runner reads the manifest out of the artifact (one pass, hashing each
-//! file) and sends it to the agent. The agent matches each file against the
+//! The build's package step hashes each file as it archives it and writes the
+//! manifest beside the artifact (see [`sidecar_path`]). The runner
+//! uses that file when it matches the artifact, and otherwise reads the
+//! manifest out of the artifact (one pass, hashing each file). It sends the
+//! manifest to the agent. The agent matches each file against the
 //! live release's stored manifest by content hash and mode, hard-links (or
 //! copies) the matches from the live release, and asks for the rest. After the
 //! swap it stores the new release's manifest under `.dep/manifests/`, with each
@@ -54,6 +57,81 @@ pub enum Kind {
 /// Files under these prefixes are copied from the live release, never linked:
 /// `bin/magento` commands may rewrite `config.php` in place.
 const ALWAYS_COPY: &[&str] = &["app/etc/"];
+
+/// The first line of a manifest file beside an artifact. The rest of the line
+/// is the artifact's length and sha256, the rest of the file [`encode`]'s bytes.
+const SIDECAR_MAGIC: &str = "magebuild-manifest 1";
+
+/// Where the package step writes the manifest of `artifact`:
+/// `artifact.tar.zst` → `artifact.tar.zst.manifest`.
+pub fn sidecar_path(artifact: &Path) -> PathBuf {
+    let mut s = artifact.as_os_str().to_owned();
+    s.push(".manifest");
+    PathBuf::from(s)
+}
+
+/// The length and sha256 of a file, read in 1 MB blocks.
+pub fn hash_file(path: &Path) -> Result<(u64, String)> {
+    let mut f = fs::File::open(path).with_context(|| format!("opening {}", path.display()))?;
+    let mut h = Sha256::new();
+    let len = std::io::copy(&mut f, &mut HashWriter(&mut h))
+        .with_context(|| format!("reading {}", path.display()))?;
+    Ok((len, super::runner::hex(&h.finalize())))
+}
+
+/// Write `entries` beside `artifact`, tied to its current bytes so a manifest
+/// left over from another build is never used for this one.
+pub fn write_sidecar(artifact: &Path, entries: &[Entry]) -> Result<()> {
+    let (len, sha) = hash_file(artifact)?;
+    let mut out = format!("{SIDECAR_MAGIC} {len} {sha}\n").into_bytes();
+    out.extend(encode(entries)?);
+    let path = sidecar_path(artifact);
+    let tmp = sidecar_path(&path);
+    fs::write(&tmp, &out).with_context(|| format!("writing {}", tmp.display()))?;
+    fs::rename(&tmp, &path).with_context(|| format!("writing {}", path.display()))
+}
+
+/// What [`read_sidecar`] found.
+pub enum Sidecar {
+    /// The manifest, and its [`encode`]d bytes to send as they are.
+    Found(Vec<Entry>, Vec<u8>),
+    Missing,
+    /// There is a file, but it isn't this artifact's manifest.
+    Unusable(String),
+}
+
+/// The manifest the package step wrote beside `artifact`, if it describes
+/// exactly these bytes.
+pub fn read_sidecar(artifact: &Path) -> Result<Sidecar> {
+    let path = sidecar_path(artifact);
+    let bytes = match fs::read(&path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Sidecar::Missing),
+        Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
+    };
+    let Some(nl) = bytes.iter().position(|&b| b == b'\n') else {
+        return Ok(Sidecar::Unusable("it has no header".into()));
+    };
+    let header = String::from_utf8_lossy(&bytes[..nl]);
+    let Some(rest) = header
+        .strip_prefix(SIDECAR_MAGIC)
+        .and_then(|r| r.strip_prefix(' '))
+    else {
+        return Ok(Sidecar::Unusable(format!("unknown header {header:?}")));
+    };
+    let (len, sha) = rest.split_once(' ').unwrap_or((rest, ""));
+    let (actual_len, actual_sha) = hash_file(artifact)?;
+    if len != actual_len.to_string() || sha != actual_sha {
+        return Ok(Sidecar::Unusable(
+            "it was written for a different artifact".into(),
+        ));
+    }
+    let encoded = bytes[nl + 1..].to_vec();
+    match decode(&encoded) {
+        Ok(entries) => Ok(Sidecar::Found(entries, encoded)),
+        Err(e) => Ok(Sidecar::Unusable(format!("{e:#}"))),
+    }
+}
 
 pub fn encode(entries: &[Entry]) -> Result<Vec<u8>> {
     let json = serde_json::to_vec(entries)?;
@@ -155,9 +233,14 @@ impl Write for HashWriter<'_> {
     }
 }
 
-/// A zstd tar of only the files at `wanted` (indices into the manifest
-/// [`from_artifact`] read from the same artifact).
-pub fn filtered(path: &Path, format: ArtifactFormat, wanted: &[u32]) -> Result<Vec<u8>> {
+/// A zstd tar of only the files at `wanted`, indices into `entries`, the
+/// artifact's manifest. Each file's path must match its manifest entry.
+pub fn filtered(
+    path: &Path,
+    format: ArtifactFormat,
+    entries: &[Entry],
+    wanted: &[u32],
+) -> Result<Vec<u8>> {
     let wanted: HashSet<u32> = wanted.iter().copied().collect();
     let mut archive = open_tar(path, format)?;
     let mut enc = zstd::stream::write::Encoder::new(Vec::new(), 3)?;
@@ -166,12 +249,24 @@ pub fn filtered(path: &Path, format: ArtifactFormat, wanted: &[u32]) -> Result<V
         enc.multithread(threads)?;
     }
     let mut builder = tar::Builder::new(enc);
+    let last = wanted.iter().copied().max();
     let mut index = 0u32;
     let mut written = 0usize;
     for e in archive.entries()? {
+        // The archive is read in order, so stop after the last file wanted.
+        if last.is_none_or(|l| index > l) {
+            break;
+        }
         let e = e?;
         let Some(rel) = entry_path(&e)? else { continue };
         if wanted.contains(&index) {
+            let expected = entries.get(index as usize).map(|e| e.path.as_str());
+            if expected != Some(rel.as_str()) {
+                bail!(
+                    "entry {index} of the artifact is {rel}, but the manifest says {}",
+                    expected.unwrap_or("nothing")
+                );
+            }
             let mut header = e.header().clone();
             builder
                 .append_data(&mut header, &rel, e)
@@ -248,7 +343,10 @@ pub fn needed(new: &[Entry], reuse: &[Option<String>]) -> Vec<u32> {
 
 /// Everything in `release` except the files being sent: directories, then the
 /// reused files linked or copied from `live_root`. Symlinks come later, in
-/// [`finish`], so nothing is ever written through one.
+/// [`finish`], so nothing is ever written through one. The agent runs this
+/// while the sent files are unpacked into the same release: the two never
+/// touch the same file, and both create directories only with
+/// `create_dir_all`, which tolerates the other creating one first.
 pub fn materialize(
     release: &Path,
     new: &[Entry],
@@ -371,7 +469,8 @@ mod tests {
         p
     }
 
-    /// One deploy as the agent does it: plan, materialize, unpack, finish.
+    /// One deploy as the agent does it: plan, then materialize while the sent
+    /// files unpack, then finish.
     fn deploy(
         art: &Path,
         release: &Path,
@@ -382,12 +481,16 @@ mod tests {
         let reuse = plan_reuse(&new, root, live);
         let need = needed(&new, &reuse);
         fs::create_dir_all(release).unwrap();
-        materialize(release, &new, &reuse, root, Reuse::Hardlink).unwrap();
-        let sent = filtered(art, ArtifactFormat::Tar, &need).unwrap();
-        let mut a = tar::Archive::new(zstd::Decoder::new(&sent[..]).unwrap());
-        a.set_preserve_permissions(true);
-        a.set_preserve_mtime(true);
-        a.unpack(release).unwrap();
+        let sent = filtered(art, ArtifactFormat::Tar, &new, &need).unwrap();
+        // Linking runs while the sent files unpack, as in the agent.
+        std::thread::scope(|s| {
+            let linking = s.spawn(|| materialize(release, &new, &reuse, root, Reuse::Hardlink));
+            let mut a = tar::Archive::new(zstd::Decoder::new(&sent[..]).unwrap());
+            a.set_preserve_permissions(true);
+            a.set_preserve_mtime(true);
+            a.unpack(release).unwrap();
+            linking.join().unwrap().unwrap();
+        });
         (need, finish(release, &new).unwrap())
     }
 
@@ -467,6 +570,20 @@ mod tests {
             0o644
         );
         assert_eq!(stored2.len(), new.len());
+        fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn a_manifest_that_does_not_match_the_artifact_is_refused() {
+        let d = tempdir("mismatch");
+        let art = artifact(&d, "1.tar", |b| {
+            file(b, "a.php", 0o644, b"a");
+            file(b, "b.php", 0o644, b"b");
+        });
+        let mut wrong = from_artifact(&art, ArtifactFormat::Tar).unwrap().unwrap();
+        wrong.swap(0, 1);
+        let err = filtered(&art, ArtifactFormat::Tar, &wrong, &[0]).unwrap_err();
+        assert!(err.to_string().contains("the manifest says b.php"), "{err}");
         fs::remove_dir_all(&d).unwrap();
     }
 

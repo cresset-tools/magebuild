@@ -346,8 +346,12 @@ code keeps working, and the next deploy applies the rest. The default,
 
 ### Sending only what changed
 
-Before connecting, the runner reads a manifest out of the artifact: every
-path with its mode and the sha256 of its contents. The agent compares it with
+The deploy works from a manifest of the artifact: every path with its mode
+and the sha256 of its contents. The package step writes it beside the
+artifact as it packs (`artifact.tar.zst` → `artifact.tar.zst.manifest`), so
+keep the two together when the deploy runs elsewhere. The runner uses that
+file only when it was written for these exact bytes, and otherwise reads the
+manifest out of the artifact, which takes about a second longer. The agent compares it with
 the manifest it stored for the live release (`.dep/manifests/<N>.json.zst`)
 and hard-links each file whose content and mode are unchanged from the live
 release, so the runner sends a zstd tar of only the new and changed files.
