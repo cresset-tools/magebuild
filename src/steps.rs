@@ -7,7 +7,7 @@
 //! - `DiCompile`       → `magecommand-engine`
 //! - `StaticDeploy`    → `magecommand` (`static_deploy::deploy::deploy_to_disk`)
 //! - `AutoloadDump`    → `composer-autoload`
-//! - `Package`         → native `tar` + `flate2`
+//! - `Package`         → native `tar` + `flate2`, plus the deploy manifest
 //!
 //! `StaticDeploy` still honors an explicit `command` override by shelling out
 //! (the escape hatch for a bespoke deploy invocation).
@@ -21,7 +21,9 @@ use anyhow::{Context, Result, bail};
 use gzp::ZWriter;
 use gzp::deflate::Gzip;
 use gzp::par::compress::ParCompressBuilder;
+use sha2::{Digest, Sha256};
 
+use crate::deploy::manifest;
 use crate::graph::{BuiltinStep, Node, NodeKind};
 
 /// Shared execution context: the project root every step operates on, and the
@@ -372,6 +374,15 @@ fn package(root: &Path, output: &Path, exclude_from: Option<&Path>, jobs: usize)
     }
     // Never package the artifact into itself.
     let output_abs = std::path::absolute(output).unwrap_or_else(|_| output.to_path_buf());
+    // Nor its manifest, and never leave one from an earlier build beside it.
+    let sidecar = manifest::sidecar_path(output);
+    match std::fs::remove_file(&sidecar) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            return Err(e).with_context(|| format!("removing {}", sidecar.display()));
+        }
+        _ => {}
+    }
+    let skip = [manifest::sidecar_path(&output_abs), output_abs];
 
     let ext = output
         .extension()
@@ -386,7 +397,10 @@ fn package(root: &Path, output: &Path, exclude_from: Option<&Path>, jobs: usize)
 
     let file = std::fs::File::create(output)
         .with_context(|| format!("creating archive {}", output.display()))?;
-    let written = match compress {
+    let Written {
+        count: written,
+        manifest: entries,
+    } = match compress {
         Compress::Gzip => {
             // Parallel gzip: the tar bytes stream into a worker pool that
             // compresses blocks concurrently (standard multi-member gzip;
@@ -398,7 +412,7 @@ fn package(root: &Path, output: &Path, exclude_from: Option<&Path>, jobs: usize)
                 .num_threads(jobs.max(1))
                 .map_err(|e| anyhow::anyhow!("sizing gzip pool: {e}"))?
                 .from_writer(file);
-            let (n, mut par) = write_tar(root, par, &matcher, &output_abs, jobs)?;
+            let (n, mut par) = write_tar(root, par, &matcher, &skip, jobs)?;
             par.finish()
                 .map_err(|e| anyhow::anyhow!("finalizing gzip stream: {e}"))?;
             n
@@ -412,12 +426,12 @@ fn package(root: &Path, output: &Path, exclude_from: Option<&Path>, jobs: usize)
                 enc.multithread(jobs as u32)
                     .context("enabling zstd multi-threading")?;
             }
-            let (n, enc) = write_tar(root, enc, &matcher, &output_abs, jobs)?;
+            let (n, enc) = write_tar(root, enc, &matcher, &skip, jobs)?;
             enc.finish().context("finalizing zstd stream")?;
             n
         }
         Compress::None => {
-            let (n, _file) = write_tar(root, file, &matcher, &output_abs, jobs)?;
+            let (n, _file) = write_tar(root, file, &matcher, &skip, jobs)?;
             n
         }
     };
@@ -427,6 +441,13 @@ fn package(root: &Path, output: &Path, exclude_from: Option<&Path>, jobs: usize)
         if written == 1 { "y" } else { "ies" },
         output.display()
     );
+    match entries {
+        Some(entries) => manifest::write_sidecar(output, &entries)?,
+        None => eprintln!(
+            "  package: no manifest written (the tree has entries it cannot describe), \
+             so a deploy reads the artifact instead"
+        ),
+    }
     Ok(())
 }
 
@@ -451,7 +472,7 @@ enum EntryKind {
 /// its bytes) is unchanged. Cheap per entry (`read_dir` + `symlink_metadata`);
 /// the expensive part — reading 490k file *bodies* — is what the writer
 /// parallelizes.
-fn collect_entries(root: &Path, matcher: &ExcludeMatcher, output_abs: &Path) -> Result<Vec<Entry>> {
+fn collect_entries(root: &Path, matcher: &ExcludeMatcher, skip: &[PathBuf]) -> Result<Vec<Entry>> {
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
@@ -470,8 +491,8 @@ fn collect_entries(root: &Path, matcher: &ExcludeMatcher, output_abs: &Path) -> 
                 Ok(m) => m,
                 Err(_) => continue,
             };
-            if std::path::absolute(&path).ok().as_deref() == Some(output_abs) {
-                continue; // don't archive the output into itself
+            if std::path::absolute(&path).is_ok_and(|p| skip.contains(&p)) {
+                continue; // don't archive the output or its manifest into itself
             }
             let is_dir = meta.is_dir();
             if matcher.excluded(&rel_str, is_dir) {
@@ -499,7 +520,8 @@ enum Pending {
     File {
         meta: std::fs::Metadata,
         rel: PathBuf,
-        data: mpsc::Receiver<std::io::Result<Vec<u8>>>,
+        /// The body and its sha256.
+        data: mpsc::Receiver<std::io::Result<(Vec<u8>, String)>>,
     },
     Other {
         path: PathBuf,
@@ -508,8 +530,10 @@ enum Pending {
 }
 
 /// Walk `root` and append every non-excluded file to a tar stream. Returns the
-/// entry count and the finalized underlying writer (so the caller can close a
-/// compression stream that needs an explicit finish).
+/// entry count, the deploy manifest (`None` when the tree holds something it
+/// can't describe), and the finalized underlying writer (so the caller can
+/// close a compression stream that needs an explicit finish). Each file is
+/// hashed on the worker that reads it.
 ///
 /// The serial version read all ~490k file bodies on one thread — a `open`/
 /// `read`/`close` syscall storm that dominated the package step (~70 MB/s, far
@@ -525,10 +549,12 @@ fn write_tar<W: Write>(
     root: &Path,
     writer: W,
     matcher: &ExcludeMatcher,
-    output_abs: &Path,
+    skip: &[PathBuf],
     jobs: usize,
-) -> Result<(usize, W)> {
-    let entries = collect_entries(root, matcher, output_abs)?;
+) -> Result<(Written, W)> {
+    use std::os::unix::fs::PermissionsExt;
+    let entries = collect_entries(root, matcher, skip)?;
+    let mut described: Option<Vec<manifest::Entry>> = Some(Vec::with_capacity(entries.len()));
 
     let mut builder = tar::Builder::new(writer);
     builder.follow_symlinks(false);
@@ -548,10 +574,13 @@ fn write_tar<W: Write>(
             for e in entries {
                 match e.kind {
                     EntryKind::File(meta) => {
-                        let (dtx, drx) = mpsc::sync_channel::<std::io::Result<Vec<u8>>>(1);
+                        let (dtx, drx) = mpsc::sync_channel(1);
                         let path = e.path;
                         rayon::spawn(move || {
-                            let _ = dtx.send(std::fs::read(&path));
+                            let _ = dtx.send(std::fs::read(&path).map(|b| {
+                                let sha = crate::deploy::runner::hex(&Sha256::digest(&b));
+                                (b, sha)
+                            }));
                         });
                         if job_tx
                             .send(Pending::File {
@@ -585,7 +614,7 @@ fn write_tar<W: Write>(
         for item in job_rx {
             match item {
                 Pending::File { meta, rel, data } => {
-                    let bytes = data
+                    let (bytes, sha256) = data
                         .recv()
                         .map_err(|_| anyhow::anyhow!("body reader vanished for {}", rel.display()))?
                         .with_context(|| format!("reading {}", rel.display()))?;
@@ -596,12 +625,30 @@ fn write_tar<W: Write>(
                         .append_data(&mut header, &rel, &bytes[..])
                         .with_context(|| format!("archiving {}", rel.display()))?;
                     count += 1;
+                    let kind = manifest::Kind::File {
+                        mode: meta.permissions().mode() & 0o7777,
+                        size: bytes.len() as u64,
+                        sha256,
+                        mtime: None,
+                    };
+                    describe(&mut described, &rel, kind);
                 }
                 Pending::Other { path, rel } => {
                     builder
                         .append_path_with_name(&path, &rel)
                         .with_context(|| format!("archiving {}", path.display()))?;
                     count += 1;
+                    // A symlink is described by its target; anything else
+                    // (a socket, a fifo) the manifest can't describe.
+                    match std::fs::read_link(&path)
+                        .ok()
+                        .and_then(|t| Some(t.to_str()?.to_string()))
+                    {
+                        Some(target) => {
+                            describe(&mut described, &rel, manifest::Kind::Symlink { target })
+                        }
+                        None => described = None,
+                    }
                 }
             }
         }
@@ -610,7 +657,27 @@ fn write_tar<W: Write>(
     result?;
 
     let writer = builder.into_inner().context("finalizing archive")?;
-    Ok((count, writer))
+    let written = Written {
+        count,
+        manifest: described,
+    };
+    Ok((written, writer))
+}
+
+/// What [`write_tar`] archived.
+struct Written {
+    count: usize,
+    /// `None` when the tree holds something the manifest can't describe.
+    manifest: Option<Vec<manifest::Entry>>,
+}
+
+/// Add `rel` to the manifest, or drop the manifest when the path isn't UTF-8.
+fn describe(manifest: &mut Option<Vec<manifest::Entry>>, rel: &Path, kind: manifest::Kind) {
+    let path = rel.to_str().map(|p| p.replace('\\', "/"));
+    match (manifest.as_mut(), path) {
+        (Some(m), Some(path)) => m.push(manifest::Entry { path, kind }),
+        _ => *manifest = None,
+    }
 }
 
 fn read_excludes(path: &Path) -> Result<Vec<String>> {
@@ -662,6 +729,54 @@ impl ExcludeMatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_package_step_writes_the_manifest_a_deploy_would_read() {
+        use crate::deploy::manifest::{Sidecar, from_artifact, read_sidecar, sidecar_path};
+        use crate::deploy::protocol::ArtifactFormat;
+        use std::os::unix::fs::{PermissionsExt, symlink};
+
+        let d = std::env::temp_dir().join(format!("magebuild-package-{}", std::process::id()));
+        let root = d.join("tree");
+        std::fs::create_dir_all(root.join("vendor/a/deep")).unwrap();
+        std::fs::create_dir_all(root.join("artifacts")).unwrap();
+        std::fs::write(root.join("vendor/a/deep/x.php"), "<?php // x").unwrap();
+        std::fs::write(root.join("vendor/a/empty"), "").unwrap();
+        std::fs::write(root.join("bin-magento"), "#!/usr/bin/env php").unwrap();
+        std::fs::set_permissions(
+            root.join("bin-magento"),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+        symlink("vendor/a/deep/x.php", root.join("link")).unwrap();
+
+        for name in ["artifact.tar", "artifact.tar.gz", "artifact.tar.zst"] {
+            let out = root.join("artifacts").join(name);
+            // A manifest left over from an earlier build is replaced, and is
+            // never archived.
+            std::fs::write(sidecar_path(&out), "stale").unwrap();
+            package(&root, &out, None, 2).unwrap();
+            let format = ArtifactFormat::from_path(&out).unwrap();
+            let Sidecar::Found(built, _) = read_sidecar(&out).unwrap() else {
+                panic!("{name}: no usable manifest beside the artifact");
+            };
+            let read = from_artifact(&out, format).unwrap().unwrap();
+            assert_eq!(built, read, "{name}");
+            assert_eq!(built.len(), 4, "{name}: {built:?}");
+            std::fs::remove_file(&out).unwrap();
+            std::fs::remove_file(sidecar_path(&out)).unwrap();
+        }
+
+        // A manifest describes only the artifact it was written with.
+        let out = root.join("artifacts/artifact.tar");
+        package(&root, &out, None, 2).unwrap();
+        std::fs::write(root.join("vendor/a/empty"), "now not").unwrap();
+        let sidecar = std::fs::read(sidecar_path(&out)).unwrap();
+        package(&root, &out, None, 2).unwrap();
+        std::fs::write(sidecar_path(&out), sidecar).unwrap();
+        assert!(matches!(read_sidecar(&out).unwrap(), Sidecar::Unusable(_)));
+        std::fs::remove_dir_all(&d).unwrap();
+    }
 
     /// A scratch Magento-ish project: a lock with two packages and the given
     /// `composer.json` and patch files.

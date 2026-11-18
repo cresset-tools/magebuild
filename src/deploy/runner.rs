@@ -54,9 +54,22 @@ pub fn run(mut deploy: DeploySection, opts: Options) -> Result<ExitCode> {
         let artifact = opts.artifact.clone();
         std::thread::spawn(move || -> Result<_> {
             let t = Instant::now();
+            let source = match manifest::read_sidecar(&artifact)? {
+                manifest::Sidecar::Found(entries, bytes) => {
+                    return Ok((Some(entries), Some(bytes), t.elapsed(), "from the build"));
+                }
+                manifest::Sidecar::Missing => "read from the artifact",
+                manifest::Sidecar::Unusable(why) => {
+                    eprintln!(
+                        "  manifest: not using {} ({why})",
+                        manifest::sidecar_path(&artifact).display()
+                    );
+                    "read from the artifact"
+                }
+            };
             let entries = manifest::from_artifact(&artifact, format)?;
             let bytes = entries.as_deref().map(manifest::encode).transpose()?;
-            Ok((entries, bytes, t.elapsed()))
+            Ok((entries, bytes, t.elapsed(), source))
         })
     };
     let mut ssh = opts.ssh.split_whitespace();
@@ -116,12 +129,12 @@ pub fn run(mut deploy: DeploySection, opts: Options) -> Result<ExitCode> {
             );
         }
 
-        let (entries, manifest_bytes, took) = reading
+        let (entries, manifest_bytes, took, source) = reading
             .join()
             .map_err(|_| anyhow::anyhow!("reading the manifest panicked"))??;
         match (&entries, &manifest_bytes) {
             (Some(e), Some(b)) => eprintln!(
-                "  manifest: {} entries, {:.1} MB, in {:.1}s",
+                "  manifest: {} entries, {:.1} MB, {source} in {:.1}s",
                 e.len(),
                 b.len() as f64 / 1e6,
                 took.as_secs_f64()
@@ -169,7 +182,12 @@ pub fn run(mut deploy: DeploySection, opts: Options) -> Result<ExitCode> {
                         }
                         Need::Files { indices } => {
                             let t = Instant::now();
-                            let tar = manifest::filtered(&opts.artifact, format, &indices)?;
+                            let tar = manifest::filtered(
+                                &opts.artifact,
+                                format,
+                                entries.as_deref().unwrap_or_default(),
+                                &indices,
+                            )?;
                             eprintln!(
                                 "  release {r}: sending {} of {} files, {:.1} MB (packed in {:.1}s)",
                                 indices.len(),
