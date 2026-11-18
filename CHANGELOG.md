@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.1](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.17.0...magebuild-v0.17.1) (2026-11-18)
+
+
+### Performance Improvements
+
+* **magebuild:** stage the next release ahead of the deploy ([eb884ff](https://github.com/cresset-tools/magebuild/commit/eb884ffd7bd7e26119e84cfaf6c89efd5bfdc17a))
+
 ## [0.17.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.16.0...magebuild-v0.17.0) (2026-11-18)
 
 
