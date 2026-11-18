@@ -71,8 +71,9 @@ pub struct DeploySection {
     pub cron: Cron,
     /// Reset opcache over FastCGI after the swap.
     pub opcache: Option<Opcache>,
-    /// Run `setup:db:status` / `app:config:status` checks and the upgrade or
-    /// import they call for. `check` only reports what would run.
+    /// What to do when the check finds a database upgrade or config import
+    /// to run. `auto`: run it. `refuse`: fail the deploy before anything is
+    /// touched and leave the live release serving (`check` is the old name).
     #[serde(default)]
     pub upgrade: UpgradeMode,
     /// When the store goes into maintenance for an upgrade. `always`: for the
@@ -150,7 +151,8 @@ pub enum MaintenanceMode {
 pub enum UpgradeMode {
     #[default]
     Auto,
-    Check,
+    #[serde(alias = "check")]
+    Refuse,
 }
 
 fn default_keep() -> usize {
@@ -271,6 +273,12 @@ mod tests {
         assert_eq!(d.maintenance, MaintenanceMode::Always);
         assert_eq!(d.reuse, Reuse::Hardlink);
         d.validate().unwrap();
+    }
+
+    #[test]
+    fn upgrade_refuse_accepts_its_old_name() {
+        assert_eq!(with_env("upgrade = 'refuse'").upgrade, UpgradeMode::Refuse);
+        assert_eq!(with_env("upgrade = 'check'").upgrade, UpgradeMode::Refuse);
     }
 
     #[test]

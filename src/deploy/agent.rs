@@ -381,8 +381,8 @@ impl<'o, W: Write> Deploy<'o, W> {
         }
         self.step("check", t, Some(detail))?;
 
-        if self.d().upgrade == UpgradeMode::Check && (db_upgrade || config_import) {
-            bail!("{needs}, but [deploy] upgrade = \"check\" never runs it; not swapping");
+        if self.d().upgrade == UpgradeMode::Refuse && (db_upgrade || config_import) {
+            bail!("{needs}, but [deploy] upgrade = \"refuse\" never runs it; not swapping");
         }
         let t = Instant::now();
         cron::stop(&self.d().cron)?;
