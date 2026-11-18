@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.16.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.15.0...magebuild-v0.16.0) (2026-11-18)
+
+
+### ⚠ BREAKING CHANGES
+
+* **magebuild:** a [deploy] section without [deploy.env_php] no longer validates. A host that shares env.php the Deployer way can point it at the file it already has: source = "shared/app/etc/env.php".
+
+### Features
+
+* **magebuild:** require a derived env.php and refuse a shared one ([ba3c447](https://github.com/cresset-tools/magebuild/commit/ba3c447c4bbcf5ab0ba940d9d0b790c31d249f14))
+
 ## [0.15.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.14.0...magebuild-v0.15.0) (2026-11-18)
 
 
