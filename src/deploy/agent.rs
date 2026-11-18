@@ -17,7 +17,7 @@ use std::time::Instant;
 use anyhow::{Context, Result, anyhow, bail};
 use sha2::{Digest, Sha256};
 
-use super::config::{DeploySection, MaintenanceMode, UpgradeMode};
+use super::config::{DeploySection, MaintenanceMode, Reuse, UpgradeMode};
 use super::manifest::{self, Entry};
 use super::protocol::{self, ArtifactFormat, Data, Event, Need, PROTOCOL, Plan};
 use super::{cron, envphp, fcgi, redis, session};
@@ -229,16 +229,10 @@ impl<'o, W: Write> Deploy<'o, W> {
         }
         self._lock = Some(lock(&self.root)?);
         session::open_log(&self.root);
-        // Pruned releases whose cleanup did not finish (it was killed, or the
-        // host has no detached processes) go while this one streams.
-        let releases = self.root.join("releases");
-        std::thread::spawn(move || delete_trash(&releases));
 
         let name = self.next_release_name()?;
         let release = self.root.join("releases").join(&name);
         self.record_release(&name)?;
-        fs::create_dir(&release).with_context(|| format!("creating {}", release.display()))?;
-        self.release = Some((name.clone(), release.clone()));
         let previous = fs::read_link(self.root.join("current"))
             .ok()
             .map(|l| self.root.join(l));
@@ -252,8 +246,10 @@ impl<'o, W: Write> Deploy<'o, W> {
                 .is_some_and(|p| p.join(MAINTENANCE_FLAG).exists());
         self.step("prepare", t, None)?;
 
-        // Ask for whatever the live release doesn't have, then link (or copy)
-        // the rest while the runner packs and sends it.
+        // Start from the copy of the live release the last deploy's cleanup
+        // prepared, if there is one; ask for whatever neither it nor the live
+        // release has, then link (or copy) the rest while the runner packs and
+        // sends it.
         let t = Instant::now();
         let new = self.manifest.take();
         let live = previous.as_ref().and_then(|p| {
@@ -267,21 +263,63 @@ impl<'o, W: Write> Deploy<'o, W> {
                 }
             }
         });
+        // A staged copy only helps when the new release has a manifest to
+        // compare it with; every other copy is set aside.
+        let usable = live
+            .as_ref()
+            .filter(|_| new.is_some())
+            .map(|(_, n, _)| n.as_str());
+        let staged = take_staged(&self.root, usable);
+        // Pruned releases whose cleanup did not finish (it was killed, or the
+        // host has no detached processes) and the copies just set aside go
+        // while this one streams.
+        let releases = self.root.join("releases");
+        std::thread::spawn(move || delete_trash(&releases));
+        let present = match staged {
+            Some((dir, entries)) => {
+                fs::rename(&dir, &release).with_context(|| {
+                    format!("moving {} to {}", dir.display(), release.display())
+                })?;
+                Some(entries)
+            }
+            None => {
+                fs::create_dir(&release)
+                    .with_context(|| format!("creating {}", release.display()))?;
+                None
+            }
+        };
+        self.release = Some((name.clone(), release.clone()));
         let mut reuse = None;
         let need = match (&new, &live) {
             (Some(new), Some((live_root, live_name, live))) => {
-                let planned = manifest::plan_reuse(new, live_root, live);
+                let keep = present
+                    .as_deref()
+                    .map(|p| manifest::reconcile(&release, new, p))
+                    .transpose()?;
+                let planned = manifest::plan_reuse_except(new, live_root, live, keep.as_deref());
                 let reused = planned.iter().filter(|r| r.is_some()).count();
-                let indices = manifest::needed(new, &planned);
-                reuse = Some((planned, live_root.clone()));
-                self.step(
-                    "reuse",
-                    t,
-                    Some(format!(
+                let mut indices = manifest::needed(new, &planned);
+                let detail = match &keep {
+                    Some(keep) => {
+                        indices.retain(|&i| !keep[i as usize]);
+                        let kept = new
+                            .iter()
+                            .zip(keep)
+                            .filter(|(e, k)| **k && matches!(e.kind, manifest::Kind::File { .. }))
+                            .count();
+                        format!(
+                            "{kept} files already staged, {reused} linked from release \
+                             {live_name}, {} to send",
+                            indices.len()
+                        )
+                    }
+                    None => format!(
                         "{reused} unchanged files from release {live_name}, {} to send",
                         indices.len()
-                    )),
-                )?;
+                    ),
+                };
+                reuse = Some((planned, live_root.clone()));
+                self.step("reuse", t, Some(detail))?;
                 Need::Files { indices }
             }
             _ => Need::All,
@@ -555,8 +593,8 @@ impl<'o, W: Write> Deploy<'o, W> {
         resumed.context("resuming cron after the swap")?;
 
         // Deleting a release takes seconds, so it happens after the agent
-        // exits, in a process of its own.
-        spawn_detached_cleanup(&self.root.join("releases"));
+        // exits, in a process of its own, which also stages the next release.
+        spawn_detached_cleanup(&self.root, self.d().reuse);
         session::log_line(&format!(
             "done: release {name} in {}ms{}",
             self.started.elapsed().as_millis(),
@@ -768,14 +806,79 @@ pub fn delete_trash(releases: &Path) {
     }
 }
 
+/// The copy of release `live` that the last cleanup staged (see
+/// [`stage_next`]) and its manifest, when both are there. Every other staged
+/// copy, complete or not, is set aside as trash.
+fn take_staged(root: &Path, live: Option<&str>) -> Option<(PathBuf, Vec<Entry>)> {
+    let releases = root.join("releases");
+    let wanted = live.map(manifest::staged_name);
+    let mut found = None;
+    for e in fs::read_dir(&releases).ok()?.flatten() {
+        let file = e.file_name();
+        let Some(name) = file.to_str() else { continue };
+        if !name.starts_with(".next-") {
+            continue;
+        }
+        if found.is_none() && Some(name) == wanted.as_deref() {
+            let entries = fs::read(manifest_path(root, name))
+                .ok()
+                .and_then(|b| manifest::decode(&b).ok());
+            if let Some(entries) = entries {
+                found = Some((e.path(), entries));
+                continue;
+            }
+        }
+        let _ = fs::rename(e.path(), releases.join(format!(".trash-{name}")));
+    }
+    found
+}
+
+/// Copy the live release into `releases/.next-<live>` for the next deploy to
+/// build on (see [`manifest::stage`]). It is built under a `.tmp` name and
+/// renamed when complete, so a deploy never starts from a half-built copy.
+pub fn stage_next(root: &Path, how: Reuse) -> Result<()> {
+    let live = fs::read_link(root.join("current")).context("reading current")?;
+    let live_name = live
+        .file_name()
+        .and_then(|n| n.to_str())
+        .context("current has no release name")?
+        .to_string();
+    let live_root = root.join(&live);
+    let entries = manifest::decode(&fs::read(manifest_path(root, &live_name))?)?;
+    let name = manifest::staged_name(&live_name);
+    let releases = root.join("releases");
+    let done = releases.join(&name);
+    if done.exists() {
+        return Ok(());
+    }
+    let tmp = releases.join(format!("{name}.tmp"));
+    remove_any(&tmp)?;
+    fs::create_dir(&tmp)?;
+    let built = manifest::stage(&tmp, &live_root, &entries, how).and_then(|present| {
+        store_manifest(root, &name, &present)?;
+        fs::rename(&tmp, &done)?;
+        Ok(())
+    });
+    if built.is_err() {
+        let _ = remove_any(&tmp);
+    }
+    built
+}
+
 /// `magebuild agent-cleanup` in its own process group with no stdio, so the ssh
 /// session closes as soon as the agent exits. If the host kills it with the
-/// session anyway, the next deploy finishes the job.
-fn spawn_detached_cleanup(releases: &Path) {
+/// session anyway, the next deploy deletes what is left and builds on the live
+/// release directly.
+fn spawn_detached_cleanup(root: &Path, how: Reuse) {
     use std::os::unix::process::CommandExt;
-    let spawned = Command::new("/proc/self/exe")
-        .arg("agent-cleanup")
-        .arg(releases)
+    let mut cmd = Command::new("/proc/self/exe");
+    cmd.arg("agent-cleanup")
+        .arg(root.join("releases"))
+        .arg("--stage");
+    if how == Reuse::Copy {
+        cmd.arg("--copy");
+    }
+    let spawned = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

@@ -288,6 +288,16 @@ pub fn filtered(
 /// mode, and still the size and mtime its stored manifest recorded. The file at
 /// the same path comes first; any other with the same content will do.
 pub fn plan_reuse(new: &[Entry], live_root: &Path, live: &[Entry]) -> Vec<Option<String>> {
+    plan_reuse_except(new, live_root, live, None)
+}
+
+/// [`plan_reuse`] for the entries `skip` doesn't mark; marked ones get `None`.
+pub fn plan_reuse_except(
+    new: &[Entry],
+    live_root: &Path,
+    live: &[Entry],
+    skip: Option<&[bool]>,
+) -> Vec<Option<String>> {
     type Stored<'a> = (&'a str, u64, Option<i64>);
     let mut by_path: HashMap<&str, (&str, u32, Stored)> = HashMap::new();
     let mut by_content: HashMap<(&str, u32), Vec<Stored>> = HashMap::new();
@@ -313,7 +323,11 @@ pub fn plan_reuse(new: &[Entry], live_root: &Path, live: &[Entry]) -> Vec<Option
         unchanged.then(|| path.to_string())
     };
     new.par_iter()
-        .map(|e| {
+        .enumerate()
+        .map(|(i, e)| {
+            if skip.is_some_and(|s| s[i]) {
+                return None;
+            }
             let Kind::File { mode, sha256, .. } = &e.kind else {
                 return None;
             };
@@ -394,6 +408,10 @@ pub fn finish(release: &Path, new: &[Entry]) -> Result<Vec<Entry>> {
         let p = release.join(&e.path);
         match &e.kind {
             Kind::Symlink { target } => {
+                // A staged release already has most of its symlinks.
+                if fs::read_link(&p).is_ok_and(|t| t == Path::new(target)) {
+                    continue;
+                }
                 if let Ok(m) = fs::symlink_metadata(&p) {
                     if m.is_dir() {
                         fs::remove_dir_all(&p)?;
@@ -429,6 +447,123 @@ pub fn finish(release: &Path, new: &[Entry]) -> Result<Vec<Entry>> {
             })
         })
         .collect()
+}
+
+/// The name of the copy of release `live` that is prepared for the next
+/// deploy, beside the releases.
+pub fn staged_name(live: &str) -> String {
+    format!(".next-{live}")
+}
+
+/// Build a copy of the live release in `dir`: its files hard-linked (or
+/// copied) and its symlinks, everything the artifact had and nothing the
+/// deploy added (shared links, the derived env.php). Returns the manifest of
+/// what is in `dir`, with each file's size and mtime on disk. A file that was
+/// edited since its deploy is left out, so the next deploy links or sends it.
+pub fn stage(dir: &Path, live_root: &Path, live: &[Entry], how: Reuse) -> Result<Vec<Entry>> {
+    let reuse = plan_reuse(live, live_root, live);
+    let (present, reuse): (Vec<Entry>, Vec<Option<String>>) = live
+        .iter()
+        .zip(reuse)
+        .filter(|(e, r)| !matches!(e.kind, Kind::File { .. }) || r.is_some())
+        .map(|(e, r)| (e.clone(), r))
+        .unzip();
+    materialize(dir, &present, &reuse, live_root, how)?;
+    finish(dir, &present)
+}
+
+/// Turn `release`, a staged copy whose contents `present` describes, into
+/// `new`'s starting point: remove every entry `new` doesn't have exactly as it
+/// is, and every directory `new` has no use for. Returns, for each of `new`'s
+/// entries, whether it is already in place. A file only counts when it still
+/// has the size, mtime and mode `present` recorded, the same check the live
+/// release's files get before they are linked.
+pub fn reconcile(release: &Path, new: &[Entry], present: &[Entry]) -> Result<Vec<bool>> {
+    let by_path: HashMap<&str, &Entry> = present.iter().map(|e| (e.path.as_str(), e)).collect();
+    let mut required: HashSet<&str> = HashSet::new();
+    for e in new {
+        if matches!(e.kind, Kind::Dir { .. }) {
+            required.insert(&e.path);
+        }
+        let mut p = e.path.as_str();
+        while let Some((parent, _)) = p.rsplit_once('/') {
+            required.insert(parent);
+            p = parent;
+        }
+    }
+    let keep: Vec<bool> = new
+        .par_iter()
+        .map(|e| {
+            let Some(old) = by_path.get(e.path.as_str()) else {
+                return false;
+            };
+            match (&e.kind, &old.kind) {
+                (
+                    Kind::File { mode, sha256, .. },
+                    Kind::File {
+                        mode: m,
+                        size,
+                        sha256: h,
+                        mtime,
+                    },
+                ) => {
+                    sha256 == h
+                        && mode == m
+                        && fs::symlink_metadata(release.join(&e.path)).is_ok_and(|md| {
+                            md.file_type().is_file()
+                                && md.len() == *size
+                                && Some(md.mtime()) == *mtime
+                                && md.mode() & 0o7777 == *mode
+                        })
+                }
+                (Kind::Symlink { target }, Kind::Symlink { target: t }) => target == t,
+                (Kind::Dir { .. }, Kind::Dir { .. }) => true,
+                _ => false,
+            }
+        })
+        .collect();
+    let kept: HashSet<&str> = new
+        .iter()
+        .zip(&keep)
+        .filter(|(_, k)| **k)
+        .map(|(e, _)| e.path.as_str())
+        .collect();
+    // Files and symlinks first, then directories nothing needs (with whatever
+    // is left in them). A directory `new` requires never holds a removed entry
+    // that matters: what is still in it is either kept or replaced later.
+    present
+        .par_iter()
+        .filter(|e| !matches!(e.kind, Kind::Dir { .. }) && !kept.contains(e.path.as_str()))
+        .try_for_each(|e| match fs::remove_file(release.join(&e.path)) {
+            Err(err) if err.kind() != std::io::ErrorKind::NotFound => {
+                Err(err).with_context(|| format!("removing {} from the staged release", e.path))
+            }
+            _ => Ok(()),
+        })?;
+    // Every directory the staged copy has, ancestors included.
+    let mut dirs: HashSet<&str> = HashSet::new();
+    for e in present {
+        if matches!(e.kind, Kind::Dir { .. }) {
+            dirs.insert(&e.path);
+        }
+        let mut p = e.path.as_str();
+        while let Some((parent, _)) = p.rsplit_once('/') {
+            dirs.insert(parent);
+            p = parent;
+        }
+    }
+    // Sorted, so a directory goes before anything beneath it.
+    let mut dirs: Vec<&str> = dirs.into_iter().filter(|d| !required.contains(d)).collect();
+    dirs.sort_unstable();
+    for d in dirs {
+        match fs::remove_dir_all(release.join(d)) {
+            Err(err) if err.kind() != std::io::ErrorKind::NotFound => {
+                return Err(err).with_context(|| format!("removing {d}/ from the staged release"));
+            }
+            _ => {}
+        }
+    }
+    Ok(keep)
 }
 
 #[cfg(test)]
@@ -584,6 +719,117 @@ mod tests {
         wrong.swap(0, 1);
         let err = filtered(&art, ArtifactFormat::Tar, &wrong, &[0]).unwrap_err();
         assert!(err.to_string().contains("the manifest says b.php"), "{err}");
+        fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// Every path under `dir`, with what it is, not following symlinks.
+    fn tree(dir: &Path) -> std::collections::BTreeMap<String, String> {
+        fn walk(root: &Path, dir: &Path, out: &mut std::collections::BTreeMap<String, String>) {
+            for e in fs::read_dir(dir).unwrap() {
+                let p = e.unwrap().path();
+                let rel = p.strip_prefix(root).unwrap().to_str().unwrap().to_string();
+                let m = fs::symlink_metadata(&p).unwrap();
+                if m.file_type().is_symlink() {
+                    out.insert(rel, format!("-> {}", fs::read_link(&p).unwrap().display()));
+                } else if m.is_dir() {
+                    out.insert(rel, "dir".into());
+                    walk(root, &p, out);
+                } else {
+                    let body = String::from_utf8_lossy(&fs::read(&p).unwrap()).into_owned();
+                    out.insert(rel, format!("{:o} {body}", m.mode() & 0o777));
+                }
+            }
+        }
+        let mut out = std::collections::BTreeMap::new();
+        walk(dir, dir, &mut out);
+        out
+    }
+
+    #[test]
+    fn a_staged_copy_becomes_the_next_release_with_only_the_changes() {
+        let d = tempdir("staged");
+        let a1 = artifact(&d, "1.tar", |b| {
+            file(b, "a.php", 0o644, b"one");
+            file(b, "b.php", 0o644, b"same");
+            file(b, "keep/x.php", 0o644, b"x");
+            file(b, "gone/deep/old.php", 0o644, b"old");
+            file(b, "c.sh", 0o644, b"mode changes");
+            file(b, "d", 0o644, b"becomes a link");
+            link(b, "e", "a.php");
+            file(b, "g", 0o644, b"becomes a dir");
+            file(b, "app/etc/config.php", 0o644, b"<?php return [];");
+        });
+        let a2 = artifact(&d, "2.tar", |b| {
+            file(b, "a.php", 0o644, b"two");
+            file(b, "b.php", 0o644, b"same");
+            file(b, "keep/x.php", 0o644, b"x");
+            file(b, "c.sh", 0o755, b"mode changes");
+            link(b, "d", "b.php");
+            file(b, "e", 0o644, b"now a file");
+            file(b, "g/inner.php", 0o644, b"inner");
+            file(b, "new/n.php", 0o644, b"new");
+            file(b, "app/etc/config.php", 0o644, b"<?php return [];");
+        });
+        let r1 = d.join("r1");
+        let (_, stored1) = deploy(&a1, &r1, None);
+
+        // What the cleanup does after release 1, then an edit on the host.
+        let staged = d.join(".next-1");
+        fs::create_dir(&staged).unwrap();
+        let present = stage(&staged, &r1, &stored1, Reuse::Hardlink).unwrap();
+        assert_eq!(tree(&staged), tree(&r1));
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        fs::write(r1.join("keep/x.php"), b"edited!").unwrap();
+
+        // The next deploy, as the agent does it.
+        let r2 = d.join("r2");
+        fs::rename(&staged, &r2).unwrap();
+        let new = from_artifact(&a2, ArtifactFormat::Tar).unwrap().unwrap();
+        let keep = reconcile(&r2, &new, &present).unwrap();
+        let reuse = plan_reuse_except(&new, &r1, &stored1, Some(&keep));
+        let mut need = needed(&new, &reuse);
+        need.retain(|&i| !keep[i as usize]);
+        let sent: Vec<&str> = need
+            .iter()
+            .map(|&i| new[i as usize].path.as_str())
+            .collect();
+        assert_eq!(
+            sent,
+            [
+                "a.php",
+                "keep/x.php",
+                "c.sh",
+                "e",
+                "g/inner.php",
+                "new/n.php"
+            ]
+        );
+        let tar = filtered(&a2, ArtifactFormat::Tar, &new, &need).unwrap();
+        std::thread::scope(|s| {
+            let linking = s.spawn(|| materialize(&r2, &new, &reuse, &r1, Reuse::Hardlink));
+            let mut a = tar::Archive::new(zstd::Decoder::new(&tar[..]).unwrap());
+            a.set_preserve_permissions(true);
+            a.set_overwrite(true);
+            a.unpack(&r2).unwrap();
+            linking.join().unwrap().unwrap();
+        });
+        finish(&r2, &new).unwrap();
+
+        // Exactly what a fresh deploy of the artifact gives, nothing left over.
+        let fresh = d.join("fresh");
+        deploy(&a2, &fresh, None);
+        assert_eq!(tree(&r2), tree(&fresh));
+        let ino = |r: &Path, p: &str| fs::metadata(r.join(p)).unwrap().ino();
+        assert_eq!(
+            ino(&r1, "b.php"),
+            ino(&r2, "b.php"),
+            "unchanged files stay linked"
+        );
+        assert_ne!(
+            ino(&r1, "app/etc/config.php"),
+            ino(&r2, "app/etc/config.php")
+        );
+        assert_eq!(fs::read(r1.join("a.php")).unwrap(), b"one", "r1 untouched");
         fs::remove_dir_all(&d).unwrap();
     }
 

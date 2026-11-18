@@ -359,6 +359,17 @@ A rebuild with no input changes sends a few KB instead of the whole artifact.
 The first deploy, or one whose live release has no stored manifest, sends the
 whole artifact as before.
 
+Linking costs one `link()` per unchanged file, about a second for a Magento
+release on a small VM, so it happens ahead of time. After each deploy the
+detached cleanup builds a copy of the new live release in
+`releases/.next-<N>` (hard links to its files, its symlinks, a copy of
+`app/etc/`; not the shared links or the derived env.php), under a `.tmp` name
+until it is complete. The next deploy renames that copy into place and removes
+or replaces only what changed, checking each file it keeps against the size and
+mtime recorded when the copy was made. Without a complete copy, it links from
+the live release as above. The copy is one more tree of directories and links
+on disk; with `reuse = "copy"` it is a full copy.
+
 Hard-linked files are the same file in every release that has them, so nothing
 may change a release's files in place after its deploy. `app/etc/` is always
 copied rather than linked, because `bin/magento` may rewrite `config.php`. A

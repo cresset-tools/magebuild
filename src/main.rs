@@ -131,9 +131,17 @@ enum Command {
     /// protocol on stdin/stdout.
     #[command(hide = true)]
     Agent,
-    /// Deletes the releases a deploy set aside, after the agent has exited.
+    /// Deletes the releases a deploy set aside, after the agent has exited,
+    /// and with `--stage` prepares a copy of the live release for the next.
     #[command(hide = true)]
-    AgentCleanup { releases: PathBuf },
+    AgentCleanup {
+        releases: PathBuf,
+        #[arg(long)]
+        stage: bool,
+        /// Stage by copying, not hard-linking (`[deploy] reuse = "copy"`).
+        #[arg(long)]
+        copy: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -166,7 +174,23 @@ fn run() -> Result<ExitCode> {
     if matches!(cli.command, Some(Command::Agent)) {
         return Ok(deploy::agent::run());
     }
-    if let Some(Command::AgentCleanup { releases }) = &cli.command {
+    if let Some(Command::AgentCleanup {
+        releases,
+        stage,
+        copy,
+    }) = &cli.command
+    {
+        // Staging first: it is what the next deploy waits on.
+        if *stage && let Some(root) = releases.parent() {
+            let how = if *copy {
+                deploy::config::Reuse::Copy
+            } else {
+                deploy::config::Reuse::Hardlink
+            };
+            if let Err(e) = deploy::agent::stage_next(root, how) {
+                eprintln!("agent-cleanup: staging the next release failed: {e:#}");
+            }
+        }
         deploy::agent::delete_trash(releases);
         return Ok(ExitCode::SUCCESS);
     }
