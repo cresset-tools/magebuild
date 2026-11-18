@@ -280,12 +280,18 @@ fn static_deploy(
         locales: locales.to_vec(),
         themes,
         areas: areas.to_vec(),
-        out: None,                      // default: <root>/pub/static
-        order: sdd::Order::Probe(None), // the CLI default — byte-faithful readdir order
-        no_parent,                      // default false: a child theme pulls in its parents
-        no_less,                        // Hyvä: no LESS to compile (Tailwind is plain css)
-        no_js_bundle,                   // Hyvä: no RequireJS bundles
-        no_html_minify,                 // parity no-op (magecommand never minifies html)
+        out: None, // default: <root>/pub/static
+        // Bundle in byte-sorted order, not the build filesystem's readdir
+        // order. The probe reproduces what PHP would bundle on THIS machine,
+        // and on ext4 that order follows the filesystem's hash seed, so two CI
+        // runners on different images split the same modules into different
+        // bundles and every deploy resends them. Sorted is the same on every
+        // machine; RequireJS doesn't care about the order.
+        order: sdd::Order::Sorted,
+        no_parent,      // default false: a child theme pulls in its parents
+        no_less,        // Hyvä: no LESS to compile (Tailwind is plain css)
+        no_js_bundle,   // Hyvä: no RequireJS bundles
+        no_html_minify, // parity no-op (magecommand never minifies html)
         symlink: if symlink {
             sdf::Symlink::ToSource
         } else {
