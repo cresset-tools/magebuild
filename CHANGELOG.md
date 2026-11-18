@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.17.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.16.0...magebuild-v0.17.0) (2026-11-18)
+
+
+### Features
+
+* **magebuild:** rename upgrade = "check" to "refuse" ([0bb0846](https://github.com/cresset-tools/magebuild/commit/0bb08465e2380911f9a5ef07867b97ffd06d15a3))
+* **magebuild:** write the deploy manifest during the package step ([4f86faa](https://github.com/cresset-tools/magebuild/commit/4f86faa1ac964e52523a1758b38c8a42e2c63e47))
+
+
+### Bug Fixes
+
+* **magebuild:** bundle JS in sorted order so builds are reproducible ([01be1f4](https://github.com/cresset-tools/magebuild/commit/01be1f492aa5af3d69a04e74b6c565efbd1bb8b0))
+
+
+### Performance Improvements
+
+* **magebuild:** link unchanged files while the changed ones are sent ([a9777d6](https://github.com/cresset-tools/magebuild/commit/a9777d6ce5a2c12ea1de6c3f91c5a2ea491b2eed))
+
 ## [0.16.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.15.0...magebuild-v0.16.0) (2026-11-18)
 
 
