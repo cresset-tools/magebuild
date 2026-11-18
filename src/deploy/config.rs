@@ -63,6 +63,8 @@ pub struct DeploySection {
     #[serde(default = "default_writable_mode")]
     pub writable_mode: String,
     /// Derive each release's `app/etc/env.php` from a template on the host.
+    /// Required; an Option only so that a missing section gets the error
+    /// from `validate` that says what to write.
     pub env_php: Option<EnvPhp>,
     /// How to pause the store's cron and queue consumers during the deploy.
     #[serde(default)]
@@ -161,7 +163,7 @@ fn default_shared_dirs() -> Vec<String> {
     DEFAULT_SHARED_DIRS.iter().map(|s| s.to_string()).collect()
 }
 fn default_shared_files() -> Vec<String> {
-    vec!["app/etc/env.php".into(), "var/.maintenance.ip".into()]
+    vec!["var/.maintenance.ip".into()]
 }
 fn default_writable_dirs() -> Vec<String> {
     DEFAULT_WRITABLE_DIRS
@@ -192,10 +194,35 @@ impl DeploySection {
                 self.writable_mode
             )
         })?;
-        if self.env_php.is_some() && self.shared_files.iter().any(|f| f == "app/etc/env.php") {
+        if self.env_php.is_none() {
             bail!(
-                "[deploy] env.php is both derived ([deploy.env_php]) and shared (shared_files); \
-                 drop app/etc/env.php from shared_files"
+                "[deploy.env_php] is required: magebuild derives each release's \
+                 app/etc/env.php from a template so it gets its own cache id_prefix. \
+                 For an env.php that is shared today, add [deploy.env_php] with \
+                 source = \"shared/app/etc/env.php\""
+            );
+        }
+        let env = "app/etc/env.php";
+        if let Some(p) = self
+            .shared_files
+            .iter()
+            .chain(self.links.keys())
+            .find(|f| f.trim_end_matches('/') == env)
+        {
+            bail!(
+                "[deploy] {p} is shared or linked, but env.php is derived \
+                 ([deploy.env_php]) so each release gets its own cache id_prefix; \
+                 drop it from shared_files and links"
+            );
+        }
+        if let Some(d) = self.shared_dirs.iter().find(|d| {
+            let d = d.trim_end_matches('/');
+            env.strip_prefix(d)
+                .is_some_and(|rest| rest.starts_with('/'))
+        }) {
+            bail!(
+                "[deploy] shared_dirs entry `{d}` would share app/etc/env.php, which \
+                 is derived per release ([deploy.env_php])"
             );
         }
         for p in self
@@ -225,12 +252,20 @@ mod tests {
         toml::from_str(s).unwrap()
     }
 
+    /// The smallest valid config, with `extra` keys before `[env_php]`.
+    fn with_env(extra: &str) -> DeploySection {
+        parse(&format!(
+            "host = 'm@h'\npath = '/srv/shop'\n{extra}\n\
+             [env_php]\nsource = 'shared/app/etc/env.php'"
+        ))
+    }
+
     #[test]
     fn defaults_follow_deployers_magento_recipe() {
-        let d = parse("host = 'm@h'\npath = '/srv/shop'");
+        let d = with_env("");
         assert_eq!(d.keep_releases, 5);
         assert!(d.shared_dirs.contains(&"pub/media".to_string()));
-        assert_eq!(d.shared_files, ["app/etc/env.php", "var/.maintenance.ip"]);
+        assert_eq!(d.shared_files, ["var/.maintenance.ip"]);
         assert!(matches!(d.cron, Cron::None));
         assert_eq!(d.upgrade, UpgradeMode::Auto);
         assert_eq!(d.maintenance, MaintenanceMode::Always);
@@ -275,15 +310,31 @@ mod tests {
     }
 
     #[test]
-    fn derived_env_php_cannot_also_be_shared() {
-        let d =
-            parse("host = 'm@h'\npath = '/srv/shop'\n[env_php]\nsource = 'shared/app/etc/env.php'");
-        assert!(d.validate().is_err());
+    fn env_php_must_be_derived() {
+        let e = parse("host = 'm@h'\npath = '/srv/shop'")
+            .validate()
+            .unwrap_err();
+        assert!(e.to_string().contains("[deploy.env_php] is required"));
+    }
+
+    #[test]
+    fn env_php_cannot_be_shared_linked_or_under_a_shared_dir() {
+        for extra in [
+            "shared_files = ['app/etc/env.php']",
+            "links = { 'app/etc/env.php' = 'shared/app/etc/env.php' }",
+            "shared_dirs = ['app/etc']",
+            "shared_dirs = ['app/']",
+        ] {
+            assert!(with_env(extra).validate().is_err(), "{extra}");
+        }
+        with_env("shared_dirs = ['app/etc/env']")
+            .validate()
+            .unwrap();
     }
 
     #[test]
     fn paths_must_stay_inside_the_release() {
-        let d = parse("host = 'm@h'\npath = '/srv/shop'\nshared_dirs = ['../etc']");
-        assert!(d.validate().is_err());
+        let e = with_env("shared_dirs = ['../etc']").validate().unwrap_err();
+        assert!(e.to_string().contains("relative path"));
     }
 }

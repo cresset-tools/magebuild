@@ -363,7 +363,12 @@ in its stored manifest, so it is sent again rather than linked. On hosts where
 something does write into releases, `reuse = "copy"` gives every release its
 own copy of each file; that costs disk, but nothing extra on the network.
 
-`shared_dirs` and `writable_dirs` default to Deployer's magento2 recipe.
+`shared_dirs` and `writable_dirs` default to Deployer's magento2 recipe;
+`shared_files` defaults to just `var/.maintenance.ip`. `[deploy.env_php]` is
+required, and `app/etc/env.php` may not be shared or linked: each release's
+env.php is derived so it gets its own cache prefix, and the new release's
+commands never touch the live release's cache. A host that shares env.php under
+Deployer already has it at `shared/app/etc/env.php`, so that path is the template.
 `upgrade = "check"` refuses to swap when an upgrade or import is needed instead
 of running it. `--agent <path>` picks the binary to run on the host (a static
 Linux build; by default the running magebuild), `--host` overrides the host,
