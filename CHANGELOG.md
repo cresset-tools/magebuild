@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.15.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.14.0...magebuild-v0.15.0) (2026-11-18)
+
+
+### ⚠ BREAKING CHANGES
+
+* **magebuild:** [deploy.env_php] no longer accepts roll_cache_prefix; a config that sets it fails to parse. The prefix is always rolled.
+
+### Features
+
+* **magebuild:** always roll the cache id_prefix of a derived env.php ([f696935](https://github.com/cresset-tools/magebuild/commit/f69693504937c13e6ae7b70beb84427ae06151e9))
+
 ## [0.14.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.13.0...magebuild-v0.14.0) (2026-11-17)
 
 
