@@ -369,8 +369,9 @@ required, and `app/etc/env.php` may not be shared or linked: each release's
 env.php is derived so it gets its own cache prefix, and the new release's
 commands never touch the live release's cache. A host that shares env.php under
 Deployer already has it at `shared/app/etc/env.php`, so that path is the template.
-`upgrade = "check"` refuses to swap when an upgrade or import is needed instead
-of running it. `--agent <path>` picks the binary to run on the host (a static
+`upgrade = "refuse"` refuses to swap when an upgrade or import is needed instead
+of running it, leaving the live release untouched (`"check"`, the old name, still
+works). `--agent <path>` picks the binary to run on the host (a static
 Linux build; by default the running magebuild), `--host` overrides the host,
 and `--ssh` the ssh command.
 
