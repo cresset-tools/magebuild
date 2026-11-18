@@ -252,7 +252,8 @@ impl<'o, W: Write> Deploy<'o, W> {
                 .is_some_and(|p| p.join(MAINTENANCE_FLAG).exists());
         self.step("prepare", t, None)?;
 
-        // Link (or copy) whatever the live release already has, and ask for the rest.
+        // Ask for whatever the live release doesn't have, then link (or copy)
+        // the rest while the runner packs and sends it.
         let t = Instant::now();
         let new = self.manifest.take();
         let live = previous.as_ref().and_then(|p| {
@@ -266,12 +267,13 @@ impl<'o, W: Write> Deploy<'o, W> {
                 }
             }
         });
+        let mut reuse = None;
         let need = match (&new, &live) {
             (Some(new), Some((live_root, live_name, live))) => {
-                let reuse = manifest::plan_reuse(new, live_root, live);
-                manifest::materialize(&release, new, &reuse, live_root, self.d().reuse)?;
-                let reused = reuse.iter().filter(|r| r.is_some()).count();
-                let indices = manifest::needed(new, &reuse);
+                let planned = manifest::plan_reuse(new, live_root, live);
+                let reused = planned.iter().filter(|r| r.is_some()).count();
+                let indices = manifest::needed(new, &planned);
+                reuse = Some((planned, live_root.clone()));
                 self.step(
                     "reuse",
                     t,
@@ -297,9 +299,28 @@ impl<'o, W: Write> Deploy<'o, W> {
         )?;
 
         let t = Instant::now();
-        let data: Data =
-            protocol::recv(input)?.context("the runner closed the session before sending data")?;
-        extract(input, data.len, data.format, &release)?;
+        let how = self.d().reuse;
+        let data = std::thread::scope(|s| -> Result<Data> {
+            let linking = match (&new, &reuse) {
+                (Some(new), Some((planned, live_root))) => {
+                    Some(s.spawn(|| manifest::materialize(&release, new, planned, live_root, how)))
+                }
+                _ => None,
+            };
+            let received = (|| {
+                let data: Data = protocol::recv(input)?
+                    .context("the runner closed the session before sending data")?;
+                extract(input, data.len, data.format, &release)?;
+                Ok(data)
+            })();
+            // Wait for the links even when the upload failed, so nothing is
+            // still writing into the release when it is removed.
+            if let Some(h) = linking {
+                h.join()
+                    .map_err(|_| anyhow!("linking unchanged files panicked"))??;
+            }
+            received
+        })?;
         let stored = new
             .as_deref()
             .map(|m| manifest::finish(&release, m))

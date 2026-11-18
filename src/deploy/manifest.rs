@@ -249,9 +249,14 @@ pub fn filtered(
         enc.multithread(threads)?;
     }
     let mut builder = tar::Builder::new(enc);
+    let last = wanted.iter().copied().max();
     let mut index = 0u32;
     let mut written = 0usize;
     for e in archive.entries()? {
+        // The archive is read in order, so stop after the last file wanted.
+        if last.is_none_or(|l| index > l) {
+            break;
+        }
         let e = e?;
         let Some(rel) = entry_path(&e)? else { continue };
         if wanted.contains(&index) {
@@ -338,7 +343,10 @@ pub fn needed(new: &[Entry], reuse: &[Option<String>]) -> Vec<u32> {
 
 /// Everything in `release` except the files being sent: directories, then the
 /// reused files linked or copied from `live_root`. Symlinks come later, in
-/// [`finish`], so nothing is ever written through one.
+/// [`finish`], so nothing is ever written through one. The agent runs this
+/// while the sent files are unpacked into the same release: the two never
+/// touch the same file, and both create directories only with
+/// `create_dir_all`, which tolerates the other creating one first.
 pub fn materialize(
     release: &Path,
     new: &[Entry],
@@ -461,7 +469,8 @@ mod tests {
         p
     }
 
-    /// One deploy as the agent does it: plan, materialize, unpack, finish.
+    /// One deploy as the agent does it: plan, then materialize while the sent
+    /// files unpack, then finish.
     fn deploy(
         art: &Path,
         release: &Path,
@@ -472,12 +481,16 @@ mod tests {
         let reuse = plan_reuse(&new, root, live);
         let need = needed(&new, &reuse);
         fs::create_dir_all(release).unwrap();
-        materialize(release, &new, &reuse, root, Reuse::Hardlink).unwrap();
         let sent = filtered(art, ArtifactFormat::Tar, &new, &need).unwrap();
-        let mut a = tar::Archive::new(zstd::Decoder::new(&sent[..]).unwrap());
-        a.set_preserve_permissions(true);
-        a.set_preserve_mtime(true);
-        a.unpack(release).unwrap();
+        // Linking runs while the sent files unpack, as in the agent.
+        std::thread::scope(|s| {
+            let linking = s.spawn(|| materialize(release, &new, &reuse, root, Reuse::Hardlink));
+            let mut a = tar::Archive::new(zstd::Decoder::new(&sent[..]).unwrap());
+            a.set_preserve_permissions(true);
+            a.set_preserve_mtime(true);
+            a.unpack(release).unwrap();
+            linking.join().unwrap().unwrap();
+        });
         (need, finish(release, &new).unwrap())
     }
 
