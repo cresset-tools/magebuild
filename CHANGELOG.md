@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.17.2](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.17.1...magebuild-v0.17.2) (2026-11-19)
+
+
+### Performance Improvements
+
+* **magebuild:** don't look again at what a staged release already has ([8286a79](https://github.com/cresset-tools/magebuild/commit/8286a79ab999d5075b6d71aa730f7163a89d34b5))
+* **magebuild:** use mimalloc ([d7fab1a](https://github.com/cresset-tools/magebuild/commit/d7fab1adacfaf97ac5ffb98cf7ad96d440a6ae27))
+
 ## [0.17.1](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.17.0...magebuild-v0.17.1) (2026-11-18)
 
 
