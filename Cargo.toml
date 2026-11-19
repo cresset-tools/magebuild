@@ -1,6 +1,6 @@
 [package]
 name = "magebuild"
-version = "0.18.1" # x-release-please-version
+version = "0.17.3" # x-release-please-version
 edition = "2024"
 rust-version = "1.95"
 license = "EUPL-1.2"
@@ -14,9 +14,9 @@ description = "Build a Magento release as fast as possible — a parallel, DAG-o
 # write_generated); static-content-deploy: magecommand's static_deploy; Magento
 # discovery/index and `db-status`: magequery-core (its `db` feature adds the
 # pure-Rust mysql client).
-magequery-core = { git = "https://github.com/cresset-tools/magequery", rev = "6cf56f5601df06b2ab12f7aac7647e581a33fe93", features = ["db"] }
-magecommand-engine = { git = "https://github.com/cresset-tools/magequery", rev = "6cf56f5601df06b2ab12f7aac7647e581a33fe93" }
-magecommand = { git = "https://github.com/cresset-tools/magequery", rev = "6cf56f5601df06b2ab12f7aac7647e581a33fe93" }
+magequery-core = { git = "https://github.com/cresset-tools/magequery", rev = "6a3f88d4860b40efdd07b680ee35c859afa634fb", features = ["db"] }
+magecommand-engine = { git = "https://github.com/cresset-tools/magequery", rev = "6a3f88d4860b40efdd07b680ee35c859afa634fb" }
+magecommand = { git = "https://github.com/cresset-tools/magequery", rev = "6a3f88d4860b40efdd07b680ee35c859afa634fb" }
 
 # Composer client — git-pinned to cresset-tools/composer-client, so a fix
 # there is usable as soon as it lands, without waiting on a crates.io release.
@@ -31,8 +31,12 @@ clap = { version = "4", features = ["derive"] }
 rayon = "1.10"
 tar = "0.4"
 flate2 = "1"
-# zstd for `.tar.zst` artifacts — faster and denser than gzip. `zstdmt` is
-# libzstd's own worker pool, for the files a deploy sends.
+# Parallel gzip for the package step: the tar thread serializes while a worker
+# pool compresses blocks concurrently (standard multi-member .tar.gz output).
+# default-features off to skip the snappy backend we don't use.
+gzp = { version = "0.11", default-features = false, features = ["deflate_default"] }
+# zstd for `.tar.zst` artifacts — faster and denser than gzip, with the
+# `zstdmt` feature giving libzstd's built-in multi-threaded compression.
 zstd = { version = "0.13", features = ["zstdmt"] }
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }

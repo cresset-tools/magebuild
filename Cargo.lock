@@ -676,6 +676,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
+name = "core_affinity"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a034b3a7b624016c6e13f5df875747cc25f884156aad2abd12b6c46797971342"
+dependencies = [
+ "libc",
+ "num_cpus",
+ "winapi",
+]
+
+[[package]]
 name = "cow-utils"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1017,6 +1028,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "flume"
+version = "0.10.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1657b4441c3403d9f7b3409e47575237dac27b1b5726df654a6ecbf92f0f7577"
+dependencies = [
+ "futures-core",
+ "futures-sink",
+ "nanorand",
+ "pin-project",
+ "spin",
+]
+
+[[package]]
 name = "foldhash"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1148,6 +1172,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 
 [[package]]
+name = "gzp"
+version = "0.11.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7c65d1899521a11810501b50b898464d133e1afc96703cff57726964cfa7baf"
+dependencies = [
+ "byteorder",
+ "bytes",
+ "core_affinity",
+ "flate2",
+ "flume",
+ "libz-sys",
+ "num_cpus",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1172,6 +1212,12 @@ name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
+
+[[package]]
+name = "hermit-abi"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e17592d60ebacc7d5e169f4663c5f84f9161cc90328abcfe8456f41e4dfcb284"
 
 [[package]]
 name = "http"
@@ -1659,6 +1705,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fee3f59f4321dab0c78d828942e7aa09d0bd8ad6e78a501977e6bf3d02938045"
 dependencies = [
  "cc",
+ "cmake",
+ "libc",
  "pkg-config",
  "vcpkg",
 ]
@@ -1711,6 +1759,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47d9d19d1d6efa0109d2f65ff4c85cddd50bd572e5a00127ab10987290bcefae"
 
 [[package]]
+name = "lock_api"
+version = "0.4.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "224399e74b87b5f3557511d98dff8b14089b3dadafcab6bb93eab67d3aace965"
+dependencies = [
+ "scopeguard",
+]
+
+[[package]]
 name = "log"
 version = "0.4.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1733,7 +1790,7 @@ checksum = "4050469837a6ff301cd14c1f8f24f88549e6d548f24f64e2148eb0f72cebc51f"
 
 [[package]]
 name = "magebuild"
-version = "0.18.1"
+version = "0.17.3"
 dependencies = [
  "anyhow",
  "clap",
@@ -1741,6 +1798,7 @@ dependencies = [
  "composer-install",
  "composer-patches",
  "flate2",
+ "gzp",
  "libc",
  "magecommand",
  "magecommand-engine",
@@ -1757,8 +1815,8 @@ dependencies = [
 
 [[package]]
 name = "magecommand"
-version = "0.27.4"
-source = "git+https://github.com/cresset-tools/magequery?rev=6cf56f5601df06b2ab12f7aac7647e581a33fe93#6cf56f5601df06b2ab12f7aac7647e581a33fe93"
+version = "0.27.1"
+source = "git+https://github.com/cresset-tools/magequery?rev=6a3f88d4860b40efdd07b680ee35c859afa634fb#6a3f88d4860b40efdd07b680ee35c859afa634fb"
 dependencies = [
  "anstyle",
  "anyhow",
@@ -1785,15 +1843,14 @@ dependencies = [
 
 [[package]]
 name = "magecommand-engine"
-version = "0.27.4"
-source = "git+https://github.com/cresset-tools/magequery?rev=6cf56f5601df06b2ab12f7aac7647e581a33fe93#6cf56f5601df06b2ab12f7aac7647e581a33fe93"
+version = "0.27.1"
+source = "git+https://github.com/cresset-tools/magequery?rev=6a3f88d4860b40efdd07b680ee35c859afa634fb#6a3f88d4860b40efdd07b680ee35c859afa634fb"
 dependencies = [
  "blake3",
  "magecommand-php",
  "magequery-core",
  "quick-xml",
  "rayon",
- "rustc-hash",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -1801,8 +1858,8 @@ dependencies = [
 
 [[package]]
 name = "magecommand-less"
-version = "0.27.4"
-source = "git+https://github.com/cresset-tools/magequery?rev=6cf56f5601df06b2ab12f7aac7647e581a33fe93#6cf56f5601df06b2ab12f7aac7647e581a33fe93"
+version = "0.27.1"
+source = "git+https://github.com/cresset-tools/magequery?rev=6a3f88d4860b40efdd07b680ee35c859afa634fb#6a3f88d4860b40efdd07b680ee35c859afa634fb"
 dependencies = [
  "cssparser 0.37.0",
  "fancy-regex",
@@ -1813,16 +1870,16 @@ dependencies = [
 
 [[package]]
 name = "magecommand-php"
-version = "0.27.4"
-source = "git+https://github.com/cresset-tools/magequery?rev=6cf56f5601df06b2ab12f7aac7647e581a33fe93#6cf56f5601df06b2ab12f7aac7647e581a33fe93"
+version = "0.27.1"
+source = "git+https://github.com/cresset-tools/magequery?rev=6a3f88d4860b40efdd07b680ee35c859afa634fb#6a3f88d4860b40efdd07b680ee35c859afa634fb"
 dependencies = [
  "memchr",
 ]
 
 [[package]]
 name = "magequery-core"
-version = "0.27.4"
-source = "git+https://github.com/cresset-tools/magequery?rev=6cf56f5601df06b2ab12f7aac7647e581a33fe93#6cf56f5601df06b2ab12f7aac7647e581a33fe93"
+version = "0.27.1"
+source = "git+https://github.com/cresset-tools/magequery?rev=6a3f88d4860b40efdd07b680ee35c859afa634fb#6a3f88d4860b40efdd07b680ee35c859afa634fb"
 dependencies = [
  "aes",
  "base64 0.22.1",
@@ -1968,6 +2025,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nanorand"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a51313c5820b0b02bd422f4b44776fbf47961755c74ce64afc73bfad10226c3"
+dependencies = [
+ "getrandom 0.2.17",
+]
+
+[[package]]
 name = "nix"
 version = "0.32.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2068,6 +2134,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "num_cpus"
+version = "1.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91df4bbde75afed763b708b7eee1e8e7651e02d97f6d5dd763e89367e957b23b"
+dependencies = [
+ "hermit-abi",
+ "libc",
 ]
 
 [[package]]
@@ -2652,6 +2728,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c6fd9027e2d9319be6349febd1db4e8d02aa544921200c9b777720ac34a3aa89"
 dependencies = [
  "siphasher",
+]
+
+[[package]]
+name = "pin-project"
+version = "1.1.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2466b2336ed02bcdca6b294417127b90ec92038d1d5c4fbeac971a922e0e0924"
+dependencies = [
+ "pin-project-internal",
+]
+
+[[package]]
+name = "pin-project-internal"
+version = "1.1.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c96395f0a926bc13b1c17622aaddda1ecb55d49c8f1bf9777e4d877800a43f8b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -3325,6 +3421,15 @@ checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "spin"
+version = "0.9.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3763264f6b73151db08c50ff20d7d8a0b8796e021cdea7ceedad07b80155fa0e"
+dependencies = [
+ "lock_api",
 ]
 
 [[package]]
