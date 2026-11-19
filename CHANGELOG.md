@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.17.4](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.17.3...magebuild-v0.17.4) (2026-11-19)
+
+
+### Bug Fixes
+
+* **magebuild:** say which stylesheets did not compile ([91d9866](https://github.com/cresset-tools/magebuild/commit/91d986687fd879d8256cc71a7c4d1edada432497))
+* **magebuild:** static deploy with magequery 0.27.1 ([73c93f1](https://github.com/cresset-tools/magebuild/commit/73c93f160418dfe19287b03a6cc9ad34304d3dfc))
+
 ## [0.17.3](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.17.2...magebuild-v0.17.3) (2026-11-19)
 
 
