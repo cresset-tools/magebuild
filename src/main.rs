@@ -4,6 +4,12 @@
 //! package`, run with a bounded parallel ready-queue over a shared rayon pool,
 //! with each step a linked in-process engine call where one exists.
 
+// The release binaries are static musl builds, and musl's allocator is slow
+// under threads: on the demo host it cost a deploy's agent about 0.3s across
+// manifest decoding, reconciling a staged release and recording the new one.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 mod config;
 mod configstatus;
 mod dbstatus;
