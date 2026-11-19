@@ -402,9 +402,19 @@ pub fn materialize(
 
 /// After the sent files are unpacked: create the symlinks, set directory
 /// modes, check every file is there, and return the manifest to store, with
-/// each file's on-disk size and mtime.
-pub fn finish(release: &Path, new: &[Entry]) -> Result<Vec<Entry>> {
-    for e in new {
+/// each file's on-disk size and mtime. `in_place` is what [`reconcile`] found
+/// already in place in a staged copy: those entries were just checked, so
+/// they are taken as they are instead of being looked at again.
+pub fn finish(
+    release: &Path,
+    new: &[Entry],
+    in_place: Option<&[Option<&Entry>]>,
+) -> Result<Vec<Entry>> {
+    let placed = |i: usize| in_place.and_then(|p| p[i]);
+    for (i, e) in new.iter().enumerate() {
+        if placed(i).is_some() {
+            continue;
+        }
         let p = release.join(&e.path);
         match &e.kind {
             Kind::Symlink { target } => {
@@ -426,7 +436,11 @@ pub fn finish(release: &Path, new: &[Entry]) -> Result<Vec<Entry>> {
         }
     }
     new.par_iter()
-        .map(|e| {
+        .enumerate()
+        .map(|(i, e)| {
+            if let Some(p) = placed(i) {
+                return Ok(p.clone());
+            }
             let Kind::File { sha256, .. } = &e.kind else {
                 return Ok(e.clone());
             };
@@ -469,16 +483,21 @@ pub fn stage(dir: &Path, live_root: &Path, live: &[Entry], how: Reuse) -> Result
         .map(|(e, r)| (e.clone(), r))
         .unzip();
     materialize(dir, &present, &reuse, live_root, how)?;
-    finish(dir, &present)
+    finish(dir, &present, None)
 }
 
 /// Turn `release`, a staged copy whose contents `present` describes, into
 /// `new`'s starting point: remove every entry `new` doesn't have exactly as it
 /// is, and every directory `new` has no use for. Returns, for each of `new`'s
-/// entries, whether it is already in place. A file only counts when it still
-/// has the size, mtime and mode `present` recorded, the same check the live
-/// release's files get before they are linked.
-pub fn reconcile(release: &Path, new: &[Entry], present: &[Entry]) -> Result<Vec<bool>> {
+/// entries, the entry as it is on disk when it is already in place. A file
+/// only counts when it still has the size, mtime and mode `present` recorded,
+/// the same check the live release's files get before they are linked; a
+/// directory when it has the mode `new` wants.
+pub fn reconcile<'a>(
+    release: &Path,
+    new: &[Entry],
+    present: &'a [Entry],
+) -> Result<Vec<Option<&'a Entry>>> {
     let by_path: HashMap<&str, &Entry> = present.iter().map(|e| (e.path.as_str(), e)).collect();
     let mut required: HashSet<&str> = HashSet::new();
     for e in new {
@@ -491,13 +510,11 @@ pub fn reconcile(release: &Path, new: &[Entry], present: &[Entry]) -> Result<Vec
             p = parent;
         }
     }
-    let keep: Vec<bool> = new
+    let keep: Vec<Option<&Entry>> = new
         .par_iter()
         .map(|e| {
-            let Some(old) = by_path.get(e.path.as_str()) else {
-                return false;
-            };
-            match (&e.kind, &old.kind) {
+            let old: &Entry = by_path.get(e.path.as_str())?;
+            let in_place = match (&e.kind, &old.kind) {
                 (
                     Kind::File { mode, sha256, .. },
                     Kind::File {
@@ -517,15 +534,17 @@ pub fn reconcile(release: &Path, new: &[Entry], present: &[Entry]) -> Result<Vec
                         })
                 }
                 (Kind::Symlink { target }, Kind::Symlink { target: t }) => target == t,
-                (Kind::Dir { .. }, Kind::Dir { .. }) => true,
+                (Kind::Dir { mode }, Kind::Dir { mode: m }) => mode == m,
                 _ => false,
-            }
+            };
+            // `old` has the on-disk size and mtime that were just checked.
+            in_place.then_some(old)
         })
         .collect();
     let kept: HashSet<&str> = new
         .iter()
         .zip(&keep)
-        .filter(|(_, k)| **k)
+        .filter(|(_, k)| k.is_some())
         .map(|(e, _)| e.path.as_str())
         .collect();
     // Files and symlinks first, then directories nothing needs (with whatever
@@ -626,7 +645,7 @@ mod tests {
             a.unpack(release).unwrap();
             linking.join().unwrap().unwrap();
         });
-        (need, finish(release, &new).unwrap())
+        (need, finish(release, &new, None).unwrap())
     }
 
     #[test]
@@ -785,7 +804,8 @@ mod tests {
         let r2 = d.join("r2");
         fs::rename(&staged, &r2).unwrap();
         let new = from_artifact(&a2, ArtifactFormat::Tar).unwrap().unwrap();
-        let keep = reconcile(&r2, &new, &present).unwrap();
+        let placed = reconcile(&r2, &new, &present).unwrap();
+        let keep: Vec<bool> = placed.iter().map(Option::is_some).collect();
         let reuse = plan_reuse_except(&new, &r1, &stored1, Some(&keep));
         let mut need = needed(&new, &reuse);
         need.retain(|&i| !keep[i as usize]);
@@ -813,7 +833,9 @@ mod tests {
             a.unpack(&r2).unwrap();
             linking.join().unwrap().unwrap();
         });
-        finish(&r2, &new).unwrap();
+        let stored2 = finish(&r2, &new, Some(&placed)).unwrap();
+        // What it records without looking again is what is on disk.
+        assert_eq!(stored2, finish(&r2, &new, None).unwrap());
 
         // Exactly what a fresh deploy of the artifact gives, nothing left over.
         let fresh = d.join("fresh");
