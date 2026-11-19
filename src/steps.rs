@@ -307,6 +307,43 @@ fn static_deploy(
     for s in &summary.skipped {
         eprintln!("  warning (scd): skipping theme {} — {}", s.id, s.reason);
     }
+    // A stylesheet that does not compile is left out and the deploy goes on,
+    // as `setup:static-content:deploy` does. Say so: a store without
+    // styles-m.css is not something to find out from a customer. The same
+    // error usually repeats for every theme and locale, so group by it. A
+    // failed entry's message starts with "entry <file>:" (LessDeployError);
+    // anything else is a compiler warning on a stylesheet that did deploy.
+    let mut failed: BTreeMap<(&str, &str), Vec<String>> = BTreeMap::new();
+    let mut compiler_warnings = 0usize;
+    for stat in &summary.stats {
+        for (file, message) in &stat.warnings {
+            if !message.starts_with("entry ") {
+                compiler_warnings += 1;
+                continue;
+            }
+            failed
+                .entry((file.as_str(), message.as_str()))
+                .or_default()
+                .push(format!("{}/{}/{}", stat.area, stat.theme, stat.locale));
+        }
+    }
+    for ((file, message), packages) in &failed {
+        let first = message.lines().next().unwrap_or(message);
+        let more = match packages.len() {
+            1 => String::new(),
+            n => format!(" and {} more", n - 1),
+        };
+        eprintln!("  warning (scd): {file} NOT DEPLOYED for {}{more}: {first}", packages[0]);
+    }
+    if !failed.is_empty() {
+        let stylesheets: usize = failed.values().map(Vec::len).sum();
+        eprintln!(
+            "  warning (scd): {stylesheets} stylesheet(s) did not compile and are missing from pub/static"
+        );
+    }
+    if compiler_warnings > 0 {
+        eprintln!("  static-deploy: {compiler_warnings} LESS compiler warning(s) on deployed stylesheets");
+    }
     if let Some(v) = deployed_version {
         eprintln!("  static-deploy: deployed_version.txt = {v}");
     }
