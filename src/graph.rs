@@ -9,35 +9,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 
-/// How static-deploy avoids writing the same bytes once per theme and locale.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Symlink {
-    /// Copy every file into every package.
-    #[default]
-    Off,
-    /// Each pure-copy file is a relative symlink to its `vendor/app/lib`
-    /// source (magecommand `--symlink file`). Fine when the artifact ships
-    /// `vendor` beside `pub/static`, which is magebuild's model, but it is
-    /// still one link per file per theme per locale.
-    File,
-    /// Each package directory that is byte-identical to one already deployed
-    /// is a single relative symlink to it (magecommand `--symlink dir`). Files
-    /// are real copies, written once; everything stays inside `pub/static`.
-    Dir,
-}
-
-impl Symlink {
-    /// `"file"`, `"dir"` or `"off"`, as magebuild.toml spells it.
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "off" => Some(Symlink::Off),
-            "file" => Some(Symlink::File),
-            "dir" => Some(Symlink::Dir),
-            _ => None,
-        }
-    }
-}
-
 /// Scheduling hint: only CPU-bound native work runs on the shared rayon pool
 /// (so `di-compile`'s nested `par_iter`s work-steal against other CPU nodes).
 /// I/O-bound work (downloads, subprocess waits, tar) runs on its own OS thread
@@ -92,11 +63,13 @@ pub enum BuiltinStep {
         /// Accepted for Magento parity (`--no-html-minify`); a no-op in
         /// magecommand, which byte-copies `.html` and never minifies it.
         no_html_minify: bool,
-        /// Link instead of copying (magecommand `--symlink`); see [`Symlink`].
-        /// Opt in via magebuild.toml (`[nodes.static-deploy] symlink = "dir"`),
-        /// `--preset hyva` (file links), or the `MAGEBUILD_SYMLINK` env
-        /// (mirroring `hardlink`'s `MAGEBUILD_HARDLINK`).
-        symlink: Symlink,
+        /// Materialize pure-copy assets as relative symlinks to their
+        /// `vendor/app/lib` source (magecommand `--symlink file`) instead of
+        /// copying — smaller, faster output when the artifact ships `vendor`
+        /// beside `pub/static` (magebuild's model). Opt in via magebuild.toml
+        /// (`[nodes.static-deploy] symlink = true`), `--preset hyva`, or the
+        /// `MAGEBUILD_SYMLINK` env (mirroring `hardlink`'s `MAGEBUILD_HARDLINK`).
+        symlink: bool,
         /// `pub/static/deployed_version.txt` contents — the asset-version
         /// signature stock SCD takes as `--content-version` (cache-busting).
         /// `None` ⇒ don't write the file (never an invented timestamp).
@@ -167,11 +140,7 @@ impl BuiltinStep {
                 } else {
                     ""
                 },
-                match symlink {
-                    Symlink::Off => "",
-                    Symlink::File => " --symlink=file",
-                    Symlink::Dir => " --symlink=dir",
-                },
+                if *symlink { " --symlink=file" } else { "" },
                 deployed_version
                     .as_deref()
                     .map(|v| format!(" version={v}"))
