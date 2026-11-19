@@ -1,12 +1,5 @@
 # Changelog
 
-## [0.17.3](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.17.2...magebuild-v0.17.3) (2026-11-19)
-
-
-### Performance Improvements
-
-* **magebuild:** di-compile with magequery 0.27.0, install with composer-client's map fixes ([a3a78f7](https://github.com/cresset-tools/magebuild/commit/a3a78f7632289dcc32535a8f1c15ae428b922c61))
-
 ## [0.17.2](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.17.1...magebuild-v0.17.2) (2026-11-19)
 
 
