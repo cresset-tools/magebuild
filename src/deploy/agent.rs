@@ -290,12 +290,16 @@ impl<'o, W: Write> Deploy<'o, W> {
         };
         self.release = Some((name.clone(), release.clone()));
         let mut reuse = None;
+        let mut placed = None;
         let need = match (&new, &live) {
             (Some(new), Some((live_root, live_name, live))) => {
-                let keep = present
+                placed = present
                     .as_deref()
                     .map(|p| manifest::reconcile(&release, new, p))
                     .transpose()?;
+                let keep: Option<Vec<bool>> = placed
+                    .as_ref()
+                    .map(|p| p.iter().map(Option::is_some).collect());
                 let planned = manifest::plan_reuse_except(new, live_root, live, keep.as_deref());
                 let reused = planned.iter().filter(|r| r.is_some()).count();
                 let mut indices = manifest::needed(new, &planned);
@@ -361,7 +365,7 @@ impl<'o, W: Write> Deploy<'o, W> {
         })?;
         let stored = new
             .as_deref()
-            .map(|m| manifest::finish(&release, m))
+            .map(|m| manifest::finish(&release, m, placed.as_deref()))
             .transpose()?;
         let mb = data.len as f64 / 1e6;
         let detail = match sending {
