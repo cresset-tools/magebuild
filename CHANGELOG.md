@@ -1,41 +1,5 @@
 # Changelog
 
-## [0.18.1](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.18.0...magebuild-v0.18.1) (2026-11-21)
-
-
-### Performance Improvements
-
-* **magebuild:** build with magequery 0.27.4 ([38adc9b](https://github.com/cresset-tools/magebuild/commit/38adc9bb793d0340baac23484e69964c7b277724))
-
-## [0.18.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.17.6...magebuild-v0.18.0) (2026-11-20)
-
-
-### Features
-
-* **magebuild:** symlink = "dir" links identical static directories ([0daed45](https://github.com/cresset-tools/magebuild/commit/0daed450b2f83bd477f391f136614b35f1f1d1c0))
-
-## [0.17.6](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.17.5...magebuild-v0.17.6) (2026-11-20)
-
-
-### Performance Improvements
-
-* **magebuild:** package in parallel segments ([fc82df8](https://github.com/cresset-tools/magebuild/commit/fc82df8dfce2153ae996a6f5f7d088ffc522be57))
-
-## [0.17.5](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.17.4...magebuild-v0.17.5) (2026-11-20)
-
-
-### Performance Improvements
-
-* **magebuild:** build with magequery 0.27.2 ([4558ba7](https://github.com/cresset-tools/magebuild/commit/4558ba7edfebc20fa3ddea44c476c92569b853d9))
-
-## [0.17.4](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.17.3...magebuild-v0.17.4) (2026-11-19)
-
-
-### Bug Fixes
-
-* **magebuild:** say which stylesheets did not compile ([91d9866](https://github.com/cresset-tools/magebuild/commit/91d986687fd879d8256cc71a7c4d1edada432497))
-* **magebuild:** static deploy with magequery 0.27.1 ([73c93f1](https://github.com/cresset-tools/magebuild/commit/73c93f160418dfe19287b03a6cc9ad34304d3dfc))
-
 ## [0.17.3](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.17.2...magebuild-v0.17.3) (2026-11-19)
 
 

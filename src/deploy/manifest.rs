@@ -79,10 +79,10 @@ pub fn hash_file(path: &Path) -> Result<(u64, String)> {
     Ok((len, super::runner::hex(&h.finalize())))
 }
 
-/// Write `entries` beside `artifact`, tied to its bytes (their length and
-/// sha256, which the package step computes as it writes them) so a manifest
+/// Write `entries` beside `artifact`, tied to its current bytes so a manifest
 /// left over from another build is never used for this one.
-pub fn write_sidecar(artifact: &Path, len: u64, sha: &str, entries: &[Entry]) -> Result<()> {
+pub fn write_sidecar(artifact: &Path, entries: &[Entry]) -> Result<()> {
+    let (len, sha) = hash_file(artifact)?;
     let mut out = format!("{SIDECAR_MAGIC} {len} {sha}\n").into_bytes();
     out.extend(encode(entries)?);
     let path = sidecar_path(artifact);
@@ -777,11 +777,6 @@ mod tests {
             link(b, "e", "a.php");
             file(b, "g", 0o644, b"becomes a dir");
             file(b, "app/etc/config.php", 0o644, b"<?php return [];");
-            // Static deploy's directory links: a directory that becomes a link
-            // to its twin, and a link that becomes a directory of its own.
-            file(b, "pkg/en/mod/x.js", 0o644, b"js");
-            file(b, "pkg/nl/mod/x.js", 0o644, b"js");
-            link(b, "pkg/de/mod", "../en/mod");
         });
         let a2 = artifact(&d, "2.tar", |b| {
             file(b, "a.php", 0o644, b"two");
@@ -793,9 +788,6 @@ mod tests {
             file(b, "g/inner.php", 0o644, b"inner");
             file(b, "new/n.php", 0o644, b"new");
             file(b, "app/etc/config.php", 0o644, b"<?php return [];");
-            file(b, "pkg/en/mod/x.js", 0o644, b"js");
-            link(b, "pkg/nl/mod", "../en/mod");
-            file(b, "pkg/de/mod/x.js", 0o644, b"de");
         });
         let r1 = d.join("r1");
         let (_, stored1) = deploy(&a1, &r1, None);
@@ -829,8 +821,7 @@ mod tests {
                 "c.sh",
                 "e",
                 "g/inner.php",
-                "new/n.php",
-                "pkg/de/mod/x.js"
+                "new/n.php"
             ]
         );
         let tar = filtered(&a2, ArtifactFormat::Tar, &new, &need).unwrap();
@@ -861,9 +852,6 @@ mod tests {
             ino(&r2, "app/etc/config.php")
         );
         assert_eq!(fs::read(r1.join("a.php")).unwrap(), b"one", "r1 untouched");
-        // The new directory was not written through the old link.
-        assert_eq!(fs::read(r2.join("pkg/en/mod/x.js")).unwrap(), b"js");
-        assert_eq!(fs::read(r1.join("pkg/en/mod/x.js")).unwrap(), b"js");
         fs::remove_dir_all(&d).unwrap();
     }
 
