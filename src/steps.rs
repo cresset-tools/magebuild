@@ -333,7 +333,10 @@ fn static_deploy(
             1 => String::new(),
             n => format!(" and {} more", n - 1),
         };
-        eprintln!("  warning (scd): {file} NOT DEPLOYED for {}{more}: {first}", packages[0]);
+        eprintln!(
+            "  warning (scd): {file} NOT DEPLOYED for {}{more}: {first}",
+            packages[0]
+        );
     }
     if !failed.is_empty() {
         let stylesheets: usize = failed.values().map(Vec::len).sum();
@@ -342,7 +345,9 @@ fn static_deploy(
         );
     }
     if compiler_warnings > 0 {
-        eprintln!("  static-deploy: {compiler_warnings} LESS compiler warning(s) on deployed stylesheets");
+        eprintln!(
+            "  static-deploy: {compiler_warnings} LESS compiler warning(s) on deployed stylesheets"
+        );
     }
     if let Some(v) = deployed_version {
         eprintln!("  static-deploy: deployed_version.txt = {v}");
