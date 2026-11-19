@@ -45,6 +45,7 @@ anyhow = "1"
 # deploy agent: flock, kill, getuid; and the agent binary's hash.
 libc = "0.2"
 sha2 = "0.10"
+mimalloc = "0.1"
 
 [profile.release]
 codegen-units = 1
