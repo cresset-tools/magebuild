@@ -103,7 +103,7 @@ fused = true                       # fused interceptors
 [nodes.static-deploy]
 locales = ["en_US", "nl_NL"]
 no_parent = true                   # don't deploy a theme's parent(s); see below
-symlink = "dir"                    # link instead of copying: "file" (= true) or "dir"; see below
+symlink = true                     # symlink pure copies to source; see below
 
 [nodes.composer-install]
 hardlink = true                    # see below — off by default
@@ -143,33 +143,19 @@ redundant when nothing serves it — e.g. a Hyvä storefront that only touches
 `Magento/luma` via the fallback checkout doesn't need `Magento/blank` shipped.
 Leave it off unless you know the parent is never requested at runtime.
 
-`symlink` (static-deploy, off by default) stops the deploy writing the same
-bytes once per theme and locale. It has two modes:
-
-- `"file"` (or `true`; implied by `--preset hyva`) maps to magecommand's
-  `--symlink=file`: pure-copy files (images, fonts, verbatim JS) become
-  **relative symlinks** back to their `vendor/`/`app/`/`lib/web/` source; only
-  derived files (LESS-compiled CSS, generated RequireJS, bundles) stay real.
-  The tarball ships `vendor` beside `pub/static`, so the links resolve after
-  extraction to any path and survive an atomic `current → releases/N` swap.
-- `"dir"` maps to `--symlink=dir`: every package directory (`Magento_Catalog/`,
-  `js/`, …) that is byte-identical to one already deployed becomes **one
-  relative symlink** to it, at the highest level where it matches. Files are
-  real copies, written once, and everything stays inside `pub/static`.
-
-Both serve the same bytes at the same URLs. `"file"` is still one link per file
-per theme per locale, and on a store with many themes creating those links is
-most of the deploy: a 30-theme, 2-locale shop wrote 576,000 symlinks and
-144,000 directories with `"file"`, and 24,700 links, 14,400 files and 4,300
-directories with `"dir"`. On six cores its build went from 19.4 s to 11.8 s
-(static deploy 15.5 s to 10.4 s, package 3.9 s to 1.4 s) and the artifact from
-740 MB and 785,000 entries to 452 MB and 244,000. `"dir"` is the one to pick unless something edits deployed files in
-place (an edit shows in every package that links to that directory).
-
-The `MAGEBUILD_SYMLINK` env var turns linking on where the config leaves it off:
-`MAGEBUILD_SYMLINK=dir` for directory links, any other value for file links.
-Either way the serve-time web server must follow symlinks (nginx's default,
-`disable_symlinks off`).
+`symlink` (static-deploy, off by default; also the `MAGEBUILD_SYMLINK` env var,
+and implied by `--preset hyva`) maps to magecommand's `--symlink=file`: pure-copy
+files — images, fonts, verbatim JS — become **relative symlinks** back to their
+`vendor/`/`app/`/`lib/web/` source instead of duplicated bytes; only derived
+files (LESS-compiled CSS, generated RequireJS, bundles) stay real. It's well
+suited to a magebuild artifact — the tarball ships `vendor` beside `pub/static`,
+so the relative links resolve after extraction to any path and survive an atomic
+`current → releases/N` swap. On a large multi-store the win is significant: the
+deploy stops writing, and `package` stops re-reading, the gigabytes of duplicated
+asset bytes, so the artifact shrinks several-fold (≈3.5× on one production
+multi-store tree: 2.6 GiB → 0.7 GiB). The one requirement is that the serve-time
+web server follows symlinks (nginx's default, `disable_symlinks off`); leave it
+off for a bare `pub/static` shipped without its source tree.
 
 ## Deployer integration
 
