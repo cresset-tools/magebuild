@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.5](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.17.4...magebuild-v0.17.5) (2026-11-20)
+
+
+### Performance Improvements
+
+* **magebuild:** build with magequery 0.27.2 ([4558ba7](https://github.com/cresset-tools/magebuild/commit/4558ba7edfebc20fa3ddea44c476c92569b853d9))
+
 ## [0.17.4](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.17.3...magebuild-v0.17.4) (2026-11-19)
 
 
