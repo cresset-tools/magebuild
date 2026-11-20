@@ -21,7 +21,7 @@ use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
 
 use crate::deploy::manifest;
-use crate::graph::{BuiltinStep, Node, NodeKind};
+use crate::graph::{BuiltinStep, Node, NodeKind, Symlink};
 
 /// Shared execution context: the project root every step operates on, and the
 /// job budget (used by the packaging step to size its parallel-gzip pool).
@@ -250,7 +250,7 @@ fn static_deploy(
     no_less: bool,
     no_js_bundle: bool,
     no_html_minify: bool,
-    symlink: bool,
+    symlink: Symlink,
     deployed_version: Option<&str>,
     command: Option<&str>,
 ) -> Result<()> {
@@ -266,12 +266,17 @@ fn static_deploy(
     // filter makes `deploy_to_disk` discover every registered theme.
     let themes: Vec<String> = themes.iter().filter(|t| *t != "*").cloned().collect();
 
-    // Symlink-to-source: pure-copy files become relative symlinks into
-    // `vendor/`/`app/`/`lib/web/` instead of duplicated bytes (safe here — the
-    // artifact ships those sources beside `pub/static`). Opt in via
-    // magebuild.toml / `--preset hyva` (`symlink = true`) or the MAGEBUILD_SYMLINK
-    // env, mirroring `hardlink`'s MAGEBUILD_HARDLINK toggle.
-    let symlink = symlink || std::env::var_os("MAGEBUILD_SYMLINK").is_some();
+    // Link instead of writing the same bytes once per theme and locale: per
+    // file into `vendor/`/`app/`/`lib/web/` (safe here, the artifact ships
+    // those sources beside `pub/static`), or per identical directory inside
+    // `pub/static`. Opt in via magebuild.toml / `--preset hyva`; the
+    // MAGEBUILD_SYMLINK env turns it on where the config left it off (file
+    // links, or `MAGEBUILD_SYMLINK=dir`), mirroring MAGEBUILD_HARDLINK.
+    let symlink = match (symlink, std::env::var_os("MAGEBUILD_SYMLINK")) {
+        (Symlink::Off, Some(v)) if v == "dir" => Symlink::Dir,
+        (Symlink::Off, Some(_)) => Symlink::File,
+        (mode, _) => mode,
+    };
 
     let req = sdd::DeployRequest {
         locales: locales.to_vec(),
@@ -289,10 +294,10 @@ fn static_deploy(
         no_less,        // Hyvä: no LESS to compile (Tailwind is plain css)
         no_js_bundle,   // Hyvä: no RequireJS bundles
         no_html_minify, // parity no-op (magecommand never minifies html)
-        symlink: if symlink {
-            sdf::Symlink::ToSource
-        } else {
-            sdf::Symlink::None
+        symlink: match symlink {
+            Symlink::Off => sdf::Symlink::None,
+            Symlink::File => sdf::Symlink::ToSource,
+            Symlink::Dir => sdf::Symlink::IdenticalDirs,
         },
         deployed_version: deployed_version.map(str::to_string),
         jobs: None,         // rayon global pool — overlaps di-compile's own pool
