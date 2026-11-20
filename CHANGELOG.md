@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.6](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.17.5...magebuild-v0.17.6) (2026-11-20)
+
+
+### Performance Improvements
+
+* **magebuild:** package in parallel segments ([fc82df8](https://github.com/cresset-tools/magebuild/commit/fc82df8dfce2153ae996a6f5f7d088ffc522be57))
+
 ## [0.17.5](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.17.4...magebuild-v0.17.5) (2026-11-20)
 
 
