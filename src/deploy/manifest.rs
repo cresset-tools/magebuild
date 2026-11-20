@@ -79,10 +79,10 @@ pub fn hash_file(path: &Path) -> Result<(u64, String)> {
     Ok((len, super::runner::hex(&h.finalize())))
 }
 
-/// Write `entries` beside `artifact`, tied to its current bytes so a manifest
+/// Write `entries` beside `artifact`, tied to its bytes (their length and
+/// sha256, which the package step computes as it writes them) so a manifest
 /// left over from another build is never used for this one.
-pub fn write_sidecar(artifact: &Path, entries: &[Entry]) -> Result<()> {
-    let (len, sha) = hash_file(artifact)?;
+pub fn write_sidecar(artifact: &Path, len: u64, sha: &str, entries: &[Entry]) -> Result<()> {
     let mut out = format!("{SIDECAR_MAGIC} {len} {sha}\n").into_bytes();
     out.extend(encode(entries)?);
     let path = sidecar_path(artifact);

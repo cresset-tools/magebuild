@@ -18,9 +18,6 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
 use anyhow::{Context, Result, bail};
-use gzp::ZWriter;
-use gzp::deflate::Gzip;
-use gzp::par::compress::ParCompressBuilder;
 use sha2::{Digest, Sha256};
 
 use crate::deploy::manifest;
@@ -393,20 +390,20 @@ fn run_command(
 const ZSTD_LEVEL: i32 = 3;
 
 /// The artifact compression, chosen from the output extension.
+#[derive(Clone, Copy)]
 enum Compress {
     /// `.tar` — no compression.
     None,
-    /// `.tar.gz` / `.tgz` — parallel gzip via `gzp`.
+    /// `.tar.gz` / `.tgz` — gzip, one member per segment.
     Gzip,
-    /// `.tar.zst` / `.tzst` — multi-threaded zstd.
+    /// `.tar.zst` / `.tzst` — zstd, one frame per segment.
     Zstd,
 }
 
 /// Package the project tree into `output`, honoring an excludes file.
 /// Compression is chosen by extension (`.tar.gz`/`.tgz` → gzip, `.tar.zst`/
-/// `.tzst` → zstd, else uncompressed) and runs multi-threaded across `jobs`
-/// (the tar serializer runs on this thread; the compression pipelines behind
-/// it).
+/// `.tzst` → zstd, else uncompressed); see [`write_tar`] for how the work is
+/// spread over the pool.
 fn package(root: &Path, output: &Path, exclude_from: Option<&Path>, jobs: usize) -> Result<()> {
     let patterns = match exclude_from {
         Some(p) => read_excludes(p)?,
@@ -443,46 +440,15 @@ fn package(root: &Path, output: &Path, exclude_from: Option<&Path>, jobs: usize)
         _ => Compress::None,
     };
 
-    let file = std::fs::File::create(output)
+    let mut file = std::fs::File::create(output)
         .with_context(|| format!("creating archive {}", output.display()))?;
     let Written {
         count: written,
         manifest: entries,
-    } = match compress {
-        Compress::Gzip => {
-            // Parallel gzip: the tar bytes stream into a worker pool that
-            // compresses blocks concurrently (standard multi-member gzip;
-            // `gunzip`/`tar xzf` read it). Level 6 matches flate2's default so
-            // the artifact size is unchanged. Must `.finish()` explicitly
-            // (dropping does not finalize).
-            let par = ParCompressBuilder::<Gzip>::new()
-                .compression_level(gzp::Compression::new(6))
-                .num_threads(jobs.max(1))
-                .map_err(|e| anyhow::anyhow!("sizing gzip pool: {e}"))?
-                .from_writer(file);
-            let (n, mut par) = write_tar(root, par, &matcher, &skip, jobs)?;
-            par.finish()
-                .map_err(|e| anyhow::anyhow!("finalizing gzip stream: {e}"))?;
-            n
-        }
-        Compress::Zstd => {
-            // zstd with libzstd's own worker pool (feature `zstdmt`): one `.zst`
-            // stream, compressed multi-threaded internally. Must `.finish()`.
-            let mut enc = zstd::stream::write::Encoder::new(file, ZSTD_LEVEL)
-                .context("initializing zstd encoder")?;
-            if jobs > 1 {
-                enc.multithread(jobs as u32)
-                    .context("enabling zstd multi-threading")?;
-            }
-            let (n, enc) = write_tar(root, enc, &matcher, &skip, jobs)?;
-            enc.finish().context("finalizing zstd stream")?;
-            n
-        }
-        Compress::None => {
-            let (n, _file) = write_tar(root, file, &matcher, &skip, jobs)?;
-            n
-        }
-    };
+        len,
+        sha256,
+    } = write_tar(root, &mut file, compress, &matcher, &skip, jobs)?;
+    drop(file);
     eprintln!(
         "  package: {} entr{} -> {}",
         written,
@@ -490,7 +456,7 @@ fn package(root: &Path, output: &Path, exclude_from: Option<&Path>, jobs: usize)
         output.display()
     );
     match entries {
-        Some(entries) => manifest::write_sidecar(output, &entries)?,
+        Some(entries) => manifest::write_sidecar(output, len, &sha256, &entries)?,
         None => eprintln!(
             "  package: no manifest written (the tree has entries it cannot describe), \
              so a deploy reads the artifact instead"
@@ -507,209 +473,299 @@ struct Entry {
     kind: EntryKind,
 }
 
-/// A regular file (carry its `symlink_metadata` so the writer can stamp the tar
-/// header without a second `stat`) versus anything else — a symlink or special
-/// node the writer appends via the `stat`-and-readlink `append_path_with_name`.
+/// A regular file or a symlink (each carries its `symlink_metadata`, so the
+/// writer stamps the tar header without a second `stat`, and a symlink its
+/// target, read during the walk) versus a special node the writer appends via
+/// the `stat`-ing `append_path_with_name`.
 enum EntryKind {
     File(std::fs::Metadata),
+    Symlink {
+        meta: std::fs::Metadata,
+        target: PathBuf,
+    },
     Other,
 }
 
-/// The deterministic walk, factored out of the writer: the exact stack + per-dir
-/// sort order the serial version used, so the archive's entry order (and thus
-/// its bytes) is unchanged. Cheap per entry (`read_dir` + `symlink_metadata`);
-/// the expensive part — reading 490k file *bodies* — is what the writer
-/// parallelizes.
+/// The deterministic walk: a directory's own entries in sorted order, then its
+/// subdirectories in reverse sorted order, each in full (the order of the
+/// explicit stack this replaced, so the archive's bytes are unchanged).
+/// Directories are walked in parallel and their results joined in that order:
+/// a static deploy with symlinks leaves several hundred thousand entries that
+/// cost an `lstat` and a `readlink` each.
 fn collect_entries(root: &Path, matcher: &ExcludeMatcher, skip: &[PathBuf]) -> Result<Vec<Entry>> {
-    let mut out = Vec::new();
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        let mut entries: Vec<PathBuf> = std::fs::read_dir(&dir)
-            .with_context(|| format!("reading {}", dir.display()))?
-            .filter_map(|e| e.ok().map(|e| e.path()))
-            .collect();
-        entries.sort();
-        for path in entries {
-            let rel = match path.strip_prefix(root) {
-                Ok(r) => r.to_path_buf(),
-                Err(_) => continue,
-            };
+    walk_dir(root, root, matcher, skip)
+}
+
+fn walk_dir(
+    root: &Path,
+    dir: &Path,
+    matcher: &ExcludeMatcher,
+    skip: &[PathBuf],
+) -> Result<Vec<Entry>> {
+    use rayon::prelude::*;
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
+        .with_context(|| format!("reading {}", dir.display()))?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .collect();
+    paths.sort();
+    // `Ok` is a file to archive, `Err` a directory to descend into.
+    let classified: Vec<std::result::Result<Entry, PathBuf>> = paths
+        .into_par_iter()
+        .with_min_len(64)
+        .filter_map(|path| {
+            let rel = path.strip_prefix(root).ok()?.to_path_buf();
             let rel_str = rel.to_string_lossy().replace('\\', "/");
-            let meta = match std::fs::symlink_metadata(&path) {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
-            if std::path::absolute(&path).is_ok_and(|p| skip.contains(&p)) {
-                continue; // don't archive the output or its manifest into itself
+            let meta = std::fs::symlink_metadata(&path).ok()?;
+            // Don't archive the output or its manifest into itself.
+            if skip.iter().any(|s| s.file_name() == path.file_name())
+                && std::path::absolute(&path).is_ok_and(|p| skip.contains(&p))
+            {
+                return None;
             }
             let is_dir = meta.is_dir();
             if matcher.excluded(&rel_str, is_dir) {
-                continue;
+                return None;
             }
             if is_dir {
-                stack.push(path);
-                continue;
+                return Some(Err(path));
             }
             let kind = if meta.file_type().is_file() {
                 EntryKind::File(meta)
             } else {
-                EntryKind::Other
+                match std::fs::read_link(&path) {
+                    Ok(target) if meta.file_type().is_symlink() => {
+                        EntryKind::Symlink { meta, target }
+                    }
+                    _ => EntryKind::Other,
+                }
             };
-            out.push(Entry { path, rel, kind });
+            Some(Ok(Entry { path, rel, kind }))
+        })
+        .collect();
+    let mut out = Vec::with_capacity(classified.len());
+    let mut dirs = Vec::new();
+    for c in classified {
+        match c {
+            Ok(entry) => out.push(entry),
+            Err(dir) => dirs.push(dir),
         }
     }
+    let below: Vec<Vec<Entry>> = dirs
+        .par_iter()
+        .rev()
+        .map(|d| walk_dir(root, d, matcher, skip))
+        .collect::<Result<_>>()?;
+    out.extend(below.into_iter().flatten());
     Ok(out)
 }
 
-/// A tar entry ready for the (serial) writer: a regular file whose body is being
-/// read on a worker (awaited via `data`), or a symlink/special node the writer
-/// reads itself.
-enum Pending {
-    File {
-        meta: std::fs::Metadata,
-        rel: PathBuf,
-        /// The body and its sha256.
-        data: mpsc::Receiver<std::io::Result<(Vec<u8>, String)>>,
-    },
-    Other {
-        path: PathBuf,
-        rel: PathBuf,
-    },
+/// How much tar a worker serializes and compresses in one piece. Small enough
+/// that a few per thread fit in memory and every core has work, large enough
+/// that compressing each piece by itself costs next to nothing in size.
+const SEGMENT_BYTES: u64 = 8 << 20;
+
+/// A run of consecutive entries, serialized and compressed on one worker.
+struct Segment {
+    /// The compressed bytes, to be written as they are.
+    frame: Vec<u8>,
+    count: usize,
+    /// `None` when the run holds something the manifest can't describe.
+    manifest: Option<Vec<manifest::Entry>>,
 }
 
-/// Walk `root` and append every non-excluded file to a tar stream. Returns the
-/// entry count, the deploy manifest (`None` when the tree holds something it
-/// can't describe), and the finalized underlying writer (so the caller can
-/// close a compression stream that needs an explicit finish). Each file is
-/// hashed on the worker that reads it.
+/// Compress one piece of the tar stream as a stream of its own: a zstd frame
+/// or a gzip member. Either format is defined as a concatenation of those, so
+/// the pieces written one after another are an ordinary `.tar.zst`/`.tar.gz`.
+fn compress_frame(tar: Vec<u8>, compress: Compress) -> Result<Vec<u8>> {
+    match compress {
+        Compress::None => Ok(tar),
+        Compress::Zstd => zstd::bulk::compress(&tar, ZSTD_LEVEL).context("compressing (zstd)"),
+        Compress::Gzip => {
+            // Level 6: flate2's default, and gzip's.
+            let mut enc = flate2::write::GzEncoder::new(
+                Vec::with_capacity(tar.len() / 3),
+                flate2::Compression::new(6),
+            );
+            enc.write_all(&tar).context("compressing (gzip)")?;
+            enc.finish().context("compressing (gzip)")
+        }
+    }
+}
+
+/// Serialize `entries` as tar (without the end-of-archive marker), hashing each
+/// file as it is read, and compress the result.
+fn tar_segment(entries: Vec<Entry>, compress: Compress) -> Result<Segment> {
+    use std::os::unix::fs::PermissionsExt;
+    let size: u64 = entries
+        .iter()
+        .map(|e| match &e.kind {
+            EntryKind::File(meta) => 1024 + meta.len(),
+            _ => 512,
+        })
+        .sum();
+    let mut described = Some(Vec::with_capacity(entries.len()));
+    let count = entries.len();
+    let mut builder = tar::Builder::new(Vec::with_capacity(size as usize + 2048));
+    builder.follow_symlinks(false);
+    for Entry { path, rel, kind } in entries {
+        match kind {
+            EntryKind::File(meta) => {
+                let bytes =
+                    std::fs::read(&path).with_context(|| format!("reading {}", rel.display()))?;
+                let mut header = tar::Header::new_gnu();
+                header.set_metadata(&meta);
+                header.set_size(bytes.len() as u64);
+                builder
+                    .append_data(&mut header, &rel, &bytes[..])
+                    .with_context(|| format!("archiving {}", rel.display()))?;
+                let kind = manifest::Kind::File {
+                    mode: meta.permissions().mode() & 0o7777,
+                    size: bytes.len() as u64,
+                    sha256: crate::deploy::runner::hex(&Sha256::digest(&bytes)),
+                    mtime: None,
+                };
+                describe(&mut described, &rel, kind);
+            }
+            EntryKind::Symlink { meta, target } => {
+                let mut header = tar::Header::new_gnu();
+                header.set_metadata(&meta);
+                builder
+                    .append_link(&mut header, &rel, &target)
+                    .with_context(|| format!("archiving {}", rel.display()))?;
+                match target.to_str() {
+                    Some(target) => {
+                        let target = target.to_string();
+                        describe(&mut described, &rel, manifest::Kind::Symlink { target })
+                    }
+                    None => described = None,
+                }
+            }
+            // A socket, a fifo: archived, but the manifest can't describe it.
+            EntryKind::Other => {
+                builder
+                    .append_path_with_name(&path, &rel)
+                    .with_context(|| format!("archiving {}", path.display()))?;
+                described = None;
+            }
+        }
+    }
+    // The builder ends what it writes with the end-of-archive marker, which
+    // belongs after the last segment only.
+    let mut tar = builder.into_inner().context("serializing tar")?;
+    let end = tar.len().saturating_sub(TAR_END.len());
+    anyhow::ensure!(tar[end..] == TAR_END, "tar segment has no end marker");
+    tar.truncate(end);
+    Ok(Segment {
+        frame: compress_frame(tar, compress)?,
+        count,
+        manifest: described,
+    })
+}
+
+/// tar's end-of-archive marker: two zero blocks.
+const TAR_END: [u8; 1024] = [0; 1024];
+
+/// Walk `root` and write every non-excluded file to `out` as a (compressed)
+/// tar. Returns the entry count, the deploy manifest (`None` when the tree
+/// holds something it can't describe) and the length and sha256 of what was
+/// written.
 ///
-/// The serial version read all ~490k file bodies on one thread — a `open`/
-/// `read`/`close` syscall storm that dominated the package step (~70 MB/s, far
-/// below the SSD, and far below what zstd could consume). tar's byte stream is
-/// inherently sequential, so the *writer* stays single-threaded; what
-/// parallelizes is the reading: a producer walks the (deterministically ordered)
-/// entries and dispatches each file's body read to the rayon pool, keeping at
-/// most `window` reads in flight (a bounded look-ahead — `sync_channel(window)`
-/// back-pressures the producer, so memory stays ~`window` files, not the whole
-/// 8 GB tree). The writer consumes in walk order and appends, so the archive is
-/// byte-identical to the serial one.
-fn write_tar<W: Write>(
+/// tar's byte stream is sequential, but nothing in it spans entries, and zstd
+/// and gzip both define a file as a concatenation of independently compressed
+/// pieces. So the walked entries (in their deterministic order) are cut into
+/// runs of about [`SEGMENT_BYTES`], and each run is read, hashed, serialized
+/// and compressed on the rayon pool. This thread only writes the finished
+/// pieces in order, and a second one hashes them for the manifest, so nothing
+/// that scales with the tree runs on a single core. At most `window` runs are
+/// in flight (`sync_channel(window)` back-pressures the producer), so memory
+/// stays at about that many segments, not the whole tree.
+fn write_tar(
     root: &Path,
-    writer: W,
+    out: &mut impl Write,
+    compress: Compress,
     matcher: &ExcludeMatcher,
     skip: &[PathBuf],
     jobs: usize,
-) -> Result<(Written, W)> {
-    use std::os::unix::fs::PermissionsExt;
+) -> Result<Written> {
     let entries = collect_entries(root, matcher, skip)?;
     let mut described: Option<Vec<manifest::Entry>> = Some(Vec::with_capacity(entries.len()));
-
-    let mut builder = tar::Builder::new(writer);
-    builder.follow_symlinks(false);
     let mut count = 0usize;
 
-    // Look-ahead depth: enough to keep every worker fed without buffering the
-    // world. `jobs * 4` outstanding reads (min 8) means ~that many file bodies
-    // resident at once.
-    let window = (jobs.max(1) * 4).max(8);
-    let (job_tx, job_rx) = mpsc::sync_channel::<Pending>(window);
+    let window = (jobs.max(1) * 2).max(4);
+    let (job_tx, job_rx) = mpsc::sync_channel::<mpsc::Receiver<Result<Segment>>>(window);
+    let (hash_tx, hash_rx) = mpsc::sync_channel::<Vec<u8>>(window);
 
-    let result: Result<()> = std::thread::scope(|s| {
-        // Producer: dispatch body reads and forward pending items IN ORDER. The
-        // `sync_channel(window)` send blocks once `window` items are queued,
-        // which paces how far ahead reads run.
+    let (len, sha256) = std::thread::scope(|s| -> Result<(u64, String)> {
+        // Producer: cut the entries into runs and hand each to the pool,
+        // forwarding the pending results IN ORDER.
         s.spawn(move || {
-            for e in entries {
-                match e.kind {
-                    EntryKind::File(meta) => {
-                        let (dtx, drx) = mpsc::sync_channel(1);
-                        let path = e.path;
-                        rayon::spawn(move || {
-                            let _ = dtx.send(std::fs::read(&path).map(|b| {
-                                let sha = crate::deploy::runner::hex(&Sha256::digest(&b));
-                                (b, sha)
-                            }));
-                        });
-                        if job_tx
-                            .send(Pending::File {
-                                meta,
-                                rel: e.rel,
-                                data: drx,
-                            })
-                            .is_err()
-                        {
-                            break; // writer errored and dropped the receiver
-                        }
-                    }
-                    EntryKind::Other => {
-                        if job_tx
-                            .send(Pending::Other {
-                                path: e.path,
-                                rel: e.rel,
-                            })
-                            .is_err()
-                        {
-                            break;
-                        }
-                    }
+            let mut entries = entries.into_iter().peekable();
+            while entries.peek().is_some() {
+                let mut run = Vec::new();
+                let mut size = 0u64;
+                while size < SEGMENT_BYTES
+                    && let Some(e) = entries.next()
+                {
+                    size += match &e.kind {
+                        EntryKind::File(meta) => 1024 + meta.len(),
+                        _ => 512,
+                    };
+                    run.push(e);
+                }
+                let (tx, rx) = mpsc::sync_channel(1);
+                rayon::spawn(move || {
+                    let _ = tx.send(tar_segment(run, compress));
+                });
+                if job_tx.send(rx).is_err() {
+                    break; // the writer failed and dropped the receiver
                 }
             }
         });
+        let hasher = s.spawn(move || {
+            let mut h = Sha256::new();
+            let mut len = 0u64;
+            for frame in hash_rx {
+                len += frame.len() as u64;
+                h.update(&frame);
+            }
+            (len, crate::deploy::runner::hex(&h.finalize()))
+        });
 
-        // Consumer (this thread): append in walk order. On error, returning here
-        // drops `job_rx`, so the producer's next `send` fails and it unwinds —
-        // the scope then joins cleanly (no deadlock).
-        for item in job_rx {
-            match item {
-                Pending::File { meta, rel, data } => {
-                    let (bytes, sha256) = data
-                        .recv()
-                        .map_err(|_| anyhow::anyhow!("body reader vanished for {}", rel.display()))?
-                        .with_context(|| format!("reading {}", rel.display()))?;
-                    let mut header = tar::Header::new_gnu();
-                    header.set_metadata(&meta);
-                    header.set_size(bytes.len() as u64);
-                    builder
-                        .append_data(&mut header, &rel, &bytes[..])
-                        .with_context(|| format!("archiving {}", rel.display()))?;
-                    count += 1;
-                    let kind = manifest::Kind::File {
-                        mode: meta.permissions().mode() & 0o7777,
-                        size: bytes.len() as u64,
-                        sha256,
-                        mtime: None,
-                    };
-                    describe(&mut described, &rel, kind);
-                }
-                Pending::Other { path, rel } => {
-                    builder
-                        .append_path_with_name(&path, &rel)
-                        .with_context(|| format!("archiving {}", path.display()))?;
-                    count += 1;
-                    // A symlink is described by its target; anything else
-                    // (a socket, a fifo) the manifest can't describe.
-                    match std::fs::read_link(&path)
-                        .ok()
-                        .and_then(|t| Some(t.to_str()?.to_string()))
-                    {
-                        Some(target) => {
-                            describe(&mut described, &rel, manifest::Kind::Symlink { target })
-                        }
-                        None => described = None,
-                    }
-                }
+        // Writer (this thread): the pieces in walk order. On error, returning
+        // drops `job_rx` and `hash_tx`, so the producer's next `send` fails,
+        // the hasher's loop ends, and the scope joins.
+        let mut write = |frame: Vec<u8>| -> Result<()> {
+            out.write_all(&frame).context("writing the archive")?;
+            hash_tx
+                .send(frame)
+                .map_err(|_| anyhow::anyhow!("archive hasher vanished"))
+        };
+        for pending in job_rx {
+            let segment = pending
+                .recv()
+                .map_err(|_| anyhow::anyhow!("a packaging worker vanished"))??;
+            write(segment.frame)?;
+            count += segment.count;
+            match (described.as_mut(), segment.manifest) {
+                (Some(all), Some(part)) => all.extend(part),
+                _ => described = None,
             }
         }
-        Ok(())
-    });
-    result?;
+        write(compress_frame(TAR_END.to_vec(), compress)?)?;
+        drop(write);
+        drop(hash_tx);
+        hasher
+            .join()
+            .map_err(|_| anyhow::anyhow!("archive hasher panicked"))
+    })?;
+    out.flush().context("writing the archive")?;
 
-    let writer = builder.into_inner().context("finalizing archive")?;
-    let written = Written {
+    Ok(Written {
         count,
         manifest: described,
-    };
-    Ok((written, writer))
+        len,
+        sha256,
+    })
 }
 
 /// What [`write_tar`] archived.
@@ -717,9 +773,11 @@ struct Written {
     count: usize,
     /// `None` when the tree holds something the manifest can't describe.
     manifest: Option<Vec<manifest::Entry>>,
+    /// The length and sha256 of the archive as written.
+    len: u64,
+    sha256: String,
 }
 
-/// Add `rel` to the manifest, or drop the manifest when the path isn't UTF-8.
 fn describe(manifest: &mut Option<Vec<manifest::Entry>>, rel: &Path, kind: manifest::Kind) {
     let path = rel.to_str().map(|p| p.replace('\\', "/"));
     match (manifest.as_mut(), path) {
@@ -797,6 +855,11 @@ mod tests {
         )
         .unwrap();
         symlink("vendor/a/deep/x.php", root.join("link")).unwrap();
+        // Enough for several segments, so the artifact is several frames.
+        for n in 0..3u8 {
+            let body = vec![n; SEGMENT_BYTES as usize + 1];
+            std::fs::write(root.join(format!("vendor/a/big{n}")), body).unwrap();
+        }
 
         for name in ["artifact.tar", "artifact.tar.gz", "artifact.tar.zst"] {
             let out = root.join("artifacts").join(name);
@@ -810,7 +873,7 @@ mod tests {
             };
             let read = from_artifact(&out, format).unwrap().unwrap();
             assert_eq!(built, read, "{name}");
-            assert_eq!(built.len(), 4, "{name}: {built:?}");
+            assert_eq!(built.len(), 7, "{name}");
             std::fs::remove_file(&out).unwrap();
             std::fs::remove_file(sidecar_path(&out)).unwrap();
         }
