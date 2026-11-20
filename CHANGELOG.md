@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.17.6...magebuild-v0.18.0) (2026-11-20)
+
+
+### Features
+
+* **magebuild:** symlink = "dir" links identical static directories ([0daed45](https://github.com/cresset-tools/magebuild/commit/0daed450b2f83bd477f391f136614b35f1f1d1c0))
+
 ## [0.17.6](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.17.5...magebuild-v0.17.6) (2026-11-20)
 
 
