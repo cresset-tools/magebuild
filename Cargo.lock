@@ -1815,8 +1815,8 @@ dependencies = [
 
 [[package]]
 name = "magecommand"
-version = "0.27.1"
-source = "git+https://github.com/cresset-tools/magequery?rev=6a3f88d4860b40efdd07b680ee35c859afa634fb#6a3f88d4860b40efdd07b680ee35c859afa634fb"
+version = "0.27.2"
+source = "git+https://github.com/cresset-tools/magequery?rev=acc0fad835edabec5d58c281050ba21dd82159f5#acc0fad835edabec5d58c281050ba21dd82159f5"
 dependencies = [
  "anstyle",
  "anyhow",
@@ -1843,14 +1843,15 @@ dependencies = [
 
 [[package]]
 name = "magecommand-engine"
-version = "0.27.1"
-source = "git+https://github.com/cresset-tools/magequery?rev=6a3f88d4860b40efdd07b680ee35c859afa634fb#6a3f88d4860b40efdd07b680ee35c859afa634fb"
+version = "0.27.2"
+source = "git+https://github.com/cresset-tools/magequery?rev=acc0fad835edabec5d58c281050ba21dd82159f5#acc0fad835edabec5d58c281050ba21dd82159f5"
 dependencies = [
  "blake3",
  "magecommand-php",
  "magequery-core",
  "quick-xml",
  "rayon",
+ "rustc-hash",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -1858,8 +1859,8 @@ dependencies = [
 
 [[package]]
 name = "magecommand-less"
-version = "0.27.1"
-source = "git+https://github.com/cresset-tools/magequery?rev=6a3f88d4860b40efdd07b680ee35c859afa634fb#6a3f88d4860b40efdd07b680ee35c859afa634fb"
+version = "0.27.2"
+source = "git+https://github.com/cresset-tools/magequery?rev=acc0fad835edabec5d58c281050ba21dd82159f5#acc0fad835edabec5d58c281050ba21dd82159f5"
 dependencies = [
  "cssparser 0.37.0",
  "fancy-regex",
@@ -1870,16 +1871,16 @@ dependencies = [
 
 [[package]]
 name = "magecommand-php"
-version = "0.27.1"
-source = "git+https://github.com/cresset-tools/magequery?rev=6a3f88d4860b40efdd07b680ee35c859afa634fb#6a3f88d4860b40efdd07b680ee35c859afa634fb"
+version = "0.27.2"
+source = "git+https://github.com/cresset-tools/magequery?rev=acc0fad835edabec5d58c281050ba21dd82159f5#acc0fad835edabec5d58c281050ba21dd82159f5"
 dependencies = [
  "memchr",
 ]
 
 [[package]]
 name = "magequery-core"
-version = "0.27.1"
-source = "git+https://github.com/cresset-tools/magequery?rev=6a3f88d4860b40efdd07b680ee35c859afa634fb#6a3f88d4860b40efdd07b680ee35c859afa634fb"
+version = "0.27.2"
+source = "git+https://github.com/cresset-tools/magequery?rev=acc0fad835edabec5d58c281050ba21dd82159f5#acc0fad835edabec5d58c281050ba21dd82159f5"
 dependencies = [
  "aes",
  "base64 0.22.1",
