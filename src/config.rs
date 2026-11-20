@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
-use crate::graph::{BuiltinStep, Graph, Node, NodeKind, When};
+use crate::graph::{BuiltinStep, Graph, Node, NodeKind, Symlink, When};
 
 /// A named bundle of graph presets — a one-flag shortcut for a common stack's
 /// build shape. Applied over the built-in defaults but UNDER `magebuild.toml`,
@@ -76,7 +76,7 @@ pub fn default_graph() -> Graph {
                 no_less: false,
                 no_js_bundle: false,
                 no_html_minify: false,
-                symlink: false,
+                symlink: Symlink::Off,
                 deployed_version: None,
                 command: None,
             },
@@ -112,6 +112,26 @@ pub struct BuildSection {
     pub jobs: Option<usize>,
 }
 
+/// `symlink = true` (file links, what it meant before there were two kinds),
+/// `false`, or `"file"` / `"dir"` / `"off"`.
+fn symlink_mode<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Symlink>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Raw {
+        Flag(bool),
+        Name(String),
+    }
+    match Raw::deserialize(d)? {
+        Raw::Flag(true) => Ok(Some(Symlink::File)),
+        Raw::Flag(false) => Ok(Some(Symlink::Off)),
+        Raw::Name(n) => Symlink::parse(&n).map(Some).ok_or_else(|| {
+            serde::de::Error::custom(format!(
+                "symlink = {n:?}: expected true, false, \"file\", \"dir\" or \"off\""
+            ))
+        }),
+    }
+}
+
 /// A per-node override / addition. Every field is optional; unset fields keep
 /// the built-in default.
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -135,7 +155,8 @@ pub struct NodeSpec {
     pub no_less: Option<bool>,
     pub no_js_bundle: Option<bool>,
     pub no_html_minify: Option<bool>,
-    pub symlink: Option<bool>,
+    #[serde(default, deserialize_with = "symlink_mode")]
+    pub symlink: Option<Symlink>,
     pub deployed_version: Option<String>,
     pub exclude_from: Option<PathBuf>,
     pub output: Option<PathBuf>,
@@ -234,7 +255,7 @@ fn apply_hyva_preset(graph: &mut Graph, root: &Path) {
         *no_less = true;
         *no_js_bundle = true;
         *no_html_minify = true;
-        *symlink = true;
+        *symlink = Symlink::File;
     }
 
     // Step 1 — a Tailwind build per discovered Hyvä theme, before static-deploy.
@@ -536,6 +557,26 @@ mod tests {
     }
 
     #[test]
+    fn symlink_takes_a_flag_or_a_mode() {
+        let mode = |value: &str| {
+            let file: FileConfig =
+                toml::from_str(&format!("[nodes.static-deploy]\nsymlink = {value}\n"))?;
+            let (g, _) = resolve(&file, &BuildOptions::default(), Path::new("/x"))?;
+            match &g.get("static-deploy").unwrap().kind {
+                NodeKind::Native(BuiltinStep::StaticDeploy { symlink, .. }) => Ok(*symlink),
+                _ => panic!("static-deploy is not a StaticDeploy step"),
+            }
+        };
+        let ok = |value: &str| -> Symlink { (mode(value) as Result<_>).unwrap() };
+        assert_eq!(ok("true"), Symlink::File);
+        assert_eq!(ok("\"file\""), Symlink::File);
+        assert_eq!(ok("\"dir\""), Symlink::Dir);
+        assert_eq!(ok("false"), Symlink::Off);
+        assert_eq!(ok("\"off\""), Symlink::Off);
+        assert!((mode("\"directory\"") as Result<Symlink>).is_err());
+    }
+
+    #[test]
     fn toml_can_convert_node_to_command() {
         let file: FileConfig = toml::from_str(
             r#"
@@ -615,7 +656,11 @@ mod tests {
                 symlink,
                 ..
             }) => assert!(
-                *no_parent && *no_less && *no_js_bundle && *no_html_minify && *symlink,
+                *no_parent
+                    && *no_less
+                    && *no_js_bundle
+                    && *no_html_minify
+                    && *symlink == Symlink::File,
                 "all Hyvä deploy flags must be on"
             ),
             _ => panic!("static-deploy is not a StaticDeploy step"),
