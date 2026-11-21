@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.1](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.18.0...magebuild-v0.18.1) (2026-11-21)
+
+
+### Performance Improvements
+
+* **magebuild:** build with magequery 0.27.4 ([38adc9b](https://github.com/cresset-tools/magebuild/commit/38adc9bb793d0340baac23484e69964c7b277724))
+
 ## [0.18.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.17.6...magebuild-v0.18.0) (2026-11-20)
 
 
