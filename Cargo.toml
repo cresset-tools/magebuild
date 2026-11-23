@@ -14,17 +14,17 @@ description = "Build a Magento release as fast as possible — a parallel, DAG-o
 # write_generated); static-content-deploy: magecommand's static_deploy; Magento
 # discovery/index and `db-status`: magequery-core (its `db` feature adds the
 # pure-Rust mysql client).
-magequery-core = { git = "https://github.com/cresset-tools/magequery", rev = "6cf56f5601df06b2ab12f7aac7647e581a33fe93", features = ["db"] }
-magecommand-engine = { git = "https://github.com/cresset-tools/magequery", rev = "6cf56f5601df06b2ab12f7aac7647e581a33fe93" }
-magecommand = { git = "https://github.com/cresset-tools/magequery", rev = "6cf56f5601df06b2ab12f7aac7647e581a33fe93" }
+magequery-core = { git = "https://github.com/cresset-tools/magequery", rev = "26db1a65d38ab183964f69c25dbc521f79a6164d", features = ["db"] }
+magecommand-engine = { git = "https://github.com/cresset-tools/magequery", rev = "26db1a65d38ab183964f69c25dbc521f79a6164d" }
+magecommand = { git = "https://github.com/cresset-tools/magequery", rev = "26db1a65d38ab183964f69c25dbc521f79a6164d" }
 
 # Composer client — git-pinned to cresset-tools/composer-client, so a fix
 # there is usable as soon as it lands, without waiting on a crates.io release.
 # composer-install (install-from-lock), composer-autoload (optimized
 # dump-autoload), composer-patches (cweagans-style patches).
-composer-install = { git = "https://github.com/cresset-tools/composer-client", rev = "cde50b441182694439fe0c5fccee96c82add479a" }
-composer-autoload = { git = "https://github.com/cresset-tools/composer-client", rev = "cde50b441182694439fe0c5fccee96c82add479a" }
-composer-patches = { git = "https://github.com/cresset-tools/composer-client", rev = "cde50b441182694439fe0c5fccee96c82add479a" }
+composer-install = { git = "https://github.com/cresset-tools/composer-client", rev = "daa49f9a0160b33b18b352c0bdc9acec0154c0f0" }
+composer-autoload = { git = "https://github.com/cresset-tools/composer-client", rev = "daa49f9a0160b33b18b352c0bdc9acec0154c0f0" }
+composer-patches = { git = "https://github.com/cresset-tools/composer-client", rev = "daa49f9a0160b33b18b352c0bdc9acec0154c0f0" }
 
 # CLI + orchestration.
 clap = { version = "4", features = ["derive"] }

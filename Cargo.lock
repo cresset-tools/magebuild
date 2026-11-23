@@ -198,7 +198,7 @@ dependencies = [
  "regex",
  "rustc-hash",
  "shlex",
- "syn 2.0.119",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -486,7 +486,7 @@ dependencies = [
 [[package]]
 name = "composer-autoload"
 version = "0.1.1"
-source = "git+https://github.com/cresset-tools/composer-client?rev=cde50b441182694439fe0c5fccee96c82add479a#cde50b441182694439fe0c5fccee96c82add479a"
+source = "git+https://github.com/cresset-tools/composer-client?rev=daa49f9a0160b33b18b352c0bdc9acec0154c0f0#daa49f9a0160b33b18b352c0bdc9acec0154c0f0"
 dependencies = [
  "composer-installers",
  "composer-php-json",
@@ -504,7 +504,7 @@ dependencies = [
 [[package]]
 name = "composer-install"
 version = "0.6.1"
-source = "git+https://github.com/cresset-tools/composer-client?rev=cde50b441182694439fe0c5fccee96c82add479a#cde50b441182694439fe0c5fccee96c82add479a"
+source = "git+https://github.com/cresset-tools/composer-client?rev=daa49f9a0160b33b18b352c0bdc9acec0154c0f0#daa49f9a0160b33b18b352c0bdc9acec0154c0f0"
 dependencies = [
  "composer-auth",
  "composer-autoload",
@@ -528,7 +528,7 @@ dependencies = [
 [[package]]
 name = "composer-installers"
 version = "0.2.0"
-source = "git+https://github.com/cresset-tools/composer-client?rev=cde50b441182694439fe0c5fccee96c82add479a#cde50b441182694439fe0c5fccee96c82add479a"
+source = "git+https://github.com/cresset-tools/composer-client?rev=daa49f9a0160b33b18b352c0bdc9acec0154c0f0#daa49f9a0160b33b18b352c0bdc9acec0154c0f0"
 dependencies = [
  "eyre",
  "serde_json",
@@ -537,7 +537,7 @@ dependencies = [
 [[package]]
 name = "composer-manifest"
 version = "0.2.1"
-source = "git+https://github.com/cresset-tools/composer-client?rev=cde50b441182694439fe0c5fccee96c82add479a#cde50b441182694439fe0c5fccee96c82add479a"
+source = "git+https://github.com/cresset-tools/composer-client?rev=daa49f9a0160b33b18b352c0bdc9acec0154c0f0#daa49f9a0160b33b18b352c0bdc9acec0154c0f0"
 dependencies = [
  "composer-php-json",
  "composer-semver",
@@ -552,7 +552,7 @@ dependencies = [
 [[package]]
 name = "composer-patches"
 version = "0.2.1"
-source = "git+https://github.com/cresset-tools/composer-client?rev=cde50b441182694439fe0c5fccee96c82add479a#cde50b441182694439fe0c5fccee96c82add479a"
+source = "git+https://github.com/cresset-tools/composer-client?rev=daa49f9a0160b33b18b352c0bdc9acec0154c0f0#daa49f9a0160b33b18b352c0bdc9acec0154c0f0"
 dependencies = [
  "composer-installers",
  "eyre",
@@ -836,7 +836,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d045de693cb712d0b22c6a64be5b953f67b3ce00ab5ad3dd5d8b441886ab8e1a"
 dependencies = [
  "quote",
- "syn 2.0.119",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -1758,7 +1758,7 @@ dependencies = [
 [[package]]
 name = "magecommand"
 version = "0.27.4"
-source = "git+https://github.com/cresset-tools/magequery?rev=6cf56f5601df06b2ab12f7aac7647e581a33fe93#6cf56f5601df06b2ab12f7aac7647e581a33fe93"
+source = "git+https://github.com/cresset-tools/magequery?rev=26db1a65d38ab183964f69c25dbc521f79a6164d#26db1a65d38ab183964f69c25dbc521f79a6164d"
 dependencies = [
  "anstyle",
  "anyhow",
@@ -1786,7 +1786,7 @@ dependencies = [
 [[package]]
 name = "magecommand-engine"
 version = "0.27.4"
-source = "git+https://github.com/cresset-tools/magequery?rev=6cf56f5601df06b2ab12f7aac7647e581a33fe93#6cf56f5601df06b2ab12f7aac7647e581a33fe93"
+source = "git+https://github.com/cresset-tools/magequery?rev=26db1a65d38ab183964f69c25dbc521f79a6164d#26db1a65d38ab183964f69c25dbc521f79a6164d"
 dependencies = [
  "blake3",
  "magecommand-php",
@@ -1802,7 +1802,7 @@ dependencies = [
 [[package]]
 name = "magecommand-less"
 version = "0.27.4"
-source = "git+https://github.com/cresset-tools/magequery?rev=6cf56f5601df06b2ab12f7aac7647e581a33fe93#6cf56f5601df06b2ab12f7aac7647e581a33fe93"
+source = "git+https://github.com/cresset-tools/magequery?rev=26db1a65d38ab183964f69c25dbc521f79a6164d#26db1a65d38ab183964f69c25dbc521f79a6164d"
 dependencies = [
  "cssparser 0.37.0",
  "fancy-regex",
@@ -1814,7 +1814,7 @@ dependencies = [
 [[package]]
 name = "magecommand-php"
 version = "0.27.4"
-source = "git+https://github.com/cresset-tools/magequery?rev=6cf56f5601df06b2ab12f7aac7647e581a33fe93#6cf56f5601df06b2ab12f7aac7647e581a33fe93"
+source = "git+https://github.com/cresset-tools/magequery?rev=26db1a65d38ab183964f69c25dbc521f79a6164d#26db1a65d38ab183964f69c25dbc521f79a6164d"
 dependencies = [
  "memchr",
 ]
@@ -1822,7 +1822,7 @@ dependencies = [
 [[package]]
 name = "magequery-core"
 version = "0.27.4"
-source = "git+https://github.com/cresset-tools/magequery?rev=6cf56f5601df06b2ab12f7aac7647e581a33fe93#6cf56f5601df06b2ab12f7aac7647e581a33fe93"
+source = "git+https://github.com/cresset-tools/magequery?rev=26db1a65d38ab183964f69c25dbc521f79a6164d#26db1a65d38ab183964f69c25dbc521f79a6164d"
 dependencies = [
  "aes",
  "base64 0.22.1",
@@ -2746,7 +2746,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
@@ -2785,7 +2785,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "tracing",
  "windows-sys 0.61.2",
 ]
@@ -3432,7 +3432,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
