@@ -7,12 +7,4 @@
 ignore = [
     { id = "RUSTSEC-2026-0194", reason = "quick-xml 0.36 arrives through magecommand-engine and only parses the XML of the project being built. Remove once magequery moves to quick-xml 0.41 or later" },
     { id = "RUSTSEC-2026-0195", reason = "quick-xml 0.36 arrives through magecommand-engine and only parses the XML of the project being built. Remove once magequery moves to quick-xml 0.41 or later" },
-    { id = "RUSTSEC-2026-0367", reason = "zip 8 arrives only through composer-install 0.6.0, which never calls ZipArchive::extract. Remove once the composer-client pin moves to a release with zip 9" },
-    { id = "RUSTSEC-2026-0368", reason = "zip 8 arrives only through composer-install 0.6.0, which never calls ZipArchive::extract. Remove once the composer-client pin moves to a release with zip 9" },
-    { id = "RUSTSEC-2026-0369", reason = "zip 8 arrives only through composer-install 0.6.0, which never calls ZipArchive::extract. Remove once the composer-client pin moves to a release with zip 9" },
-    { id = "RUSTSEC-2026-0429", reason = "zip 8 arrives only through composer-install 0.6.0, which never calls ZipArchive::extract. Remove once the composer-client pin moves to a release with zip 9" },
-    { id = "RUSTSEC-2026-0545", reason = "zip 8 arrives only through composer-install 0.6.0 with just the deflate feature: no AES, no legacy decoders, no ZipStreamReader, no ZipArchive::extract. Remove once composer-install ships with zip 9" },
-    { id = "RUSTSEC-2026-0546", reason = "zip 8 arrives only through composer-install 0.6.0 with just the deflate feature: no AES, no legacy decoders, no ZipStreamReader, no ZipArchive::extract. Remove once composer-install ships with zip 9" },
-    { id = "RUSTSEC-2026-0547", reason = "zip 8 arrives only through composer-install 0.6.0 with just the deflate feature: no AES, no legacy decoders, no ZipStreamReader, no ZipArchive::extract. Remove once composer-install ships with zip 9" },
-    { id = "RUSTSEC-2026-0548", reason = "zip 8 arrives only through composer-install 0.6.0 with just the deflate feature: no AES, no legacy decoders, no ZipStreamReader, no ZipArchive::extract. Remove once composer-install ships with zip 9" },
 ]
