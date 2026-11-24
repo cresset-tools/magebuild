@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.18.2](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.18.1...magebuild-v0.18.2) (2026-11-24)
+
+
+### Bug Fixes
+
+* **deps:** bump composer-client to composer-install-v0.6.1 ([#71](https://github.com/cresset-tools/magebuild/issues/71)) ([aebf3fe](https://github.com/cresset-tools/magebuild/commit/aebf3fe54e614029f010a7c32bf032e3e7783399))
+* **deps:** drop the duplicate nix entry from Cargo.lock ([#94](https://github.com/cresset-tools/magebuild/issues/94)) ([190eda4](https://github.com/cresset-tools/magebuild/commit/190eda45c79aea44c20c5a08f6b8291f03b986a0))
+* **magebuild:** bump url to 2.5.9 for RUSTSEC-2026-0592 ([d859b46](https://github.com/cresset-tools/magebuild/commit/d859b463e712fd3e0c0ddd5f97bc392d92dbc74b))
+
 ## [0.18.1](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.18.0...magebuild-v0.18.1) (2026-11-21)
 
 
