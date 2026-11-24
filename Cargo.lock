@@ -486,7 +486,7 @@ dependencies = [
 [[package]]
 name = "composer-autoload"
 version = "0.1.1"
-source = "git+https://github.com/cresset-tools/composer-client?rev=daa49f9a0160b33b18b352c0bdc9acec0154c0f0#daa49f9a0160b33b18b352c0bdc9acec0154c0f0"
+source = "git+https://github.com/cresset-tools/composer-client?rev=bead5066e494fc98eb293fc66b019e8c07d45d9b#bead5066e494fc98eb293fc66b019e8c07d45d9b"
 dependencies = [
  "composer-installers",
  "composer-php-json",
@@ -504,7 +504,7 @@ dependencies = [
 [[package]]
 name = "composer-install"
 version = "0.6.1"
-source = "git+https://github.com/cresset-tools/composer-client?rev=daa49f9a0160b33b18b352c0bdc9acec0154c0f0#daa49f9a0160b33b18b352c0bdc9acec0154c0f0"
+source = "git+https://github.com/cresset-tools/composer-client?rev=bead5066e494fc98eb293fc66b019e8c07d45d9b#bead5066e494fc98eb293fc66b019e8c07d45d9b"
 dependencies = [
  "composer-auth",
  "composer-autoload",
@@ -528,7 +528,7 @@ dependencies = [
 [[package]]
 name = "composer-installers"
 version = "0.2.0"
-source = "git+https://github.com/cresset-tools/composer-client?rev=daa49f9a0160b33b18b352c0bdc9acec0154c0f0#daa49f9a0160b33b18b352c0bdc9acec0154c0f0"
+source = "git+https://github.com/cresset-tools/composer-client?rev=bead5066e494fc98eb293fc66b019e8c07d45d9b#bead5066e494fc98eb293fc66b019e8c07d45d9b"
 dependencies = [
  "eyre",
  "serde_json",
@@ -537,7 +537,7 @@ dependencies = [
 [[package]]
 name = "composer-manifest"
 version = "0.2.1"
-source = "git+https://github.com/cresset-tools/composer-client?rev=daa49f9a0160b33b18b352c0bdc9acec0154c0f0#daa49f9a0160b33b18b352c0bdc9acec0154c0f0"
+source = "git+https://github.com/cresset-tools/composer-client?rev=bead5066e494fc98eb293fc66b019e8c07d45d9b#bead5066e494fc98eb293fc66b019e8c07d45d9b"
 dependencies = [
  "composer-php-json",
  "composer-semver",
@@ -552,7 +552,7 @@ dependencies = [
 [[package]]
 name = "composer-patches"
 version = "0.2.1"
-source = "git+https://github.com/cresset-tools/composer-client?rev=daa49f9a0160b33b18b352c0bdc9acec0154c0f0#daa49f9a0160b33b18b352c0bdc9acec0154c0f0"
+source = "git+https://github.com/cresset-tools/composer-client?rev=bead5066e494fc98eb293fc66b019e8c07d45d9b#bead5066e494fc98eb293fc66b019e8c07d45d9b"
 dependencies = [
  "composer-installers",
  "eyre",
@@ -1757,8 +1757,8 @@ dependencies = [
 
 [[package]]
 name = "magecommand"
-version = "0.27.4"
-source = "git+https://github.com/cresset-tools/magequery?rev=26db1a65d38ab183964f69c25dbc521f79a6164d#26db1a65d38ab183964f69c25dbc521f79a6164d"
+version = "0.27.5"
+source = "git+https://github.com/cresset-tools/magequery?rev=34e09f286c8426330e4e052d0f90632985625855#34e09f286c8426330e4e052d0f90632985625855"
 dependencies = [
  "anstyle",
  "anyhow",
@@ -1785,8 +1785,8 @@ dependencies = [
 
 [[package]]
 name = "magecommand-engine"
-version = "0.27.4"
-source = "git+https://github.com/cresset-tools/magequery?rev=26db1a65d38ab183964f69c25dbc521f79a6164d#26db1a65d38ab183964f69c25dbc521f79a6164d"
+version = "0.27.5"
+source = "git+https://github.com/cresset-tools/magequery?rev=34e09f286c8426330e4e052d0f90632985625855#34e09f286c8426330e4e052d0f90632985625855"
 dependencies = [
  "blake3",
  "magecommand-php",
@@ -1801,8 +1801,8 @@ dependencies = [
 
 [[package]]
 name = "magecommand-less"
-version = "0.27.4"
-source = "git+https://github.com/cresset-tools/magequery?rev=26db1a65d38ab183964f69c25dbc521f79a6164d#26db1a65d38ab183964f69c25dbc521f79a6164d"
+version = "0.27.5"
+source = "git+https://github.com/cresset-tools/magequery?rev=34e09f286c8426330e4e052d0f90632985625855#34e09f286c8426330e4e052d0f90632985625855"
 dependencies = [
  "cssparser 0.37.0",
  "fancy-regex",
@@ -1813,16 +1813,16 @@ dependencies = [
 
 [[package]]
 name = "magecommand-php"
-version = "0.27.4"
-source = "git+https://github.com/cresset-tools/magequery?rev=26db1a65d38ab183964f69c25dbc521f79a6164d#26db1a65d38ab183964f69c25dbc521f79a6164d"
+version = "0.27.5"
+source = "git+https://github.com/cresset-tools/magequery?rev=34e09f286c8426330e4e052d0f90632985625855#34e09f286c8426330e4e052d0f90632985625855"
 dependencies = [
  "memchr",
 ]
 
 [[package]]
 name = "magequery-core"
-version = "0.27.4"
-source = "git+https://github.com/cresset-tools/magequery?rev=26db1a65d38ab183964f69c25dbc521f79a6164d#26db1a65d38ab183964f69c25dbc521f79a6164d"
+version = "0.27.5"
+source = "git+https://github.com/cresset-tools/magequery?rev=34e09f286c8426330e4e052d0f90632985625855#34e09f286c8426330e4e052d0f90632985625855"
 dependencies = [
  "aes",
  "base64 0.22.1",
