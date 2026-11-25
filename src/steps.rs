@@ -45,7 +45,7 @@ fn run_builtin(step: &BuiltinStep, ctx: &Ctx) -> Result<()> {
             cache_root,
             hardlink,
         } => composer_install(&ctx.root, *no_dev, cache_root.as_deref(), *hardlink),
-        BuiltinStep::DiCompile { fused } => di_compile(&ctx.root, *fused),
+        BuiltinStep::DiCompile { fused, target } => di_compile(&ctx.root, *fused, target),
         BuiltinStep::StaticDeploy {
             themes,
             locales,
@@ -190,9 +190,19 @@ fn build_patch_plan(root: &Path, dist_cache: &Path) -> Result<Option<composer_pa
 /// runs (`lib.rs::compile`), including the from-empty bring-up nuance: the class
 /// universe scans the frozen `generated/_code` archive when present, else the
 /// live `generated/code` (which we clear first).
-fn di_compile(root: &Path, fused: bool) -> Result<()> {
+fn di_compile(root: &Path, fused: bool, target: &crate::graph::DiTarget) -> Result<()> {
     // Magento's `BP` must be absolute (it is baked into generated regexes).
     let root = std::path::absolute(root).unwrap_or_else(|_| root.to_path_buf());
+    let target = target.as_target();
+    // Checked here, not when the config loads: the default comes from the
+    // checkout's `setup/`, which composer-install has only now put in place.
+    if magecommand_engine::arealayout::AreaLayout::resolve(&root, &target).is_none() {
+        anyhow::bail!(
+            "di-compile: area_config = \"diff\" needs a Mage-OS 4.0+ runtime, which reads area \
+files written as differences from global; this one would drop global's configuration. \
+Set target_platform = \"mageos-4.0\" if the store runs 4.0, or drop area_config."
+        );
+    }
 
     let magento = magequery_core::Magento::open(&root)
         .with_context(|| format!("not a Magento root: {}", root.display()))?;
@@ -211,7 +221,8 @@ fn di_compile(root: &Path, fused: bool) -> Result<()> {
     };
     let mut defs =
         magecommand_engine::definitions::Definitions::scan(&magento, &root, &generated_code);
-    let out = magecommand_engine::build::compute_outputs_opts(&magento, &mut defs, &root, fused);
+    let out =
+        magecommand_engine::build::compute_outputs_with(&magento, &mut defs, &root, fused, &target);
     let written = magecommand_engine::metadata::write_generated(&root, &out.files)
         .context("writing generated/")?;
     eprintln!("  di-compile: wrote {written} generated/ file(s)");

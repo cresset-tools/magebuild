@@ -258,7 +258,14 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn cpu(id: &str, after: &[&str]) -> Node {
-        Node::native(id, after, BuiltinStep::DiCompile { fused: false })
+        Node::native(
+            id,
+            after,
+            BuiltinStep::DiCompile {
+                fused: false,
+                target: crate::graph::DiTarget::default(),
+            },
+        )
     }
 
     // An I/O node forces the OS-thread path (Command cost is IoBound).
