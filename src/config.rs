@@ -10,7 +10,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
-use crate::graph::{BuiltinStep, Graph, Node, NodeKind, Symlink, When};
+use magecommand_engine::arealayout::AreaLayout;
+use magecommand_engine::lazytypes::Platform;
+
+use crate::graph::{BuiltinStep, DiTarget, Graph, Node, NodeKind, Symlink, When};
 
 /// A named bundle of graph presets — a one-flag shortcut for a common stack's
 /// build shape. Applied over the built-in defaults but UNDER `magebuild.toml`,
@@ -55,7 +58,10 @@ pub fn default_graph() -> Graph {
         Node::native(
             "di-compile",
             &["composer-install"],
-            BuiltinStep::DiCompile { fused: false },
+            BuiltinStep::DiCompile {
+                fused: false,
+                target: DiTarget::default(),
+            },
         ),
         Node::native(
             "autoload-dump",
@@ -132,6 +138,17 @@ fn symlink_mode<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Symlink
     }
 }
 
+/// A value named the way `magecommand di compile` names it (`mageos-4.0`,
+/// `full`), parsed by the engine so the two accept the same names.
+fn by_name<'de, D, T>(d: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: std::str::FromStr<Err = String>,
+{
+    let name = String::deserialize(d)?;
+    name.parse().map(Some).map_err(serde::de::Error::custom)
+}
+
 /// A per-node override / addition. Every field is optional; unset fields keep
 /// the built-in default.
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -146,6 +163,14 @@ pub struct NodeSpec {
     pub no_dev: Option<bool>,
     pub optimize: Option<bool>,
     pub fused: Option<bool>,
+    /// di-compile: the PHP version the store runs (`--target-php`).
+    pub target_php: Option<String>,
+    /// di-compile: the platform the store runs (`--target-platform`).
+    #[serde(default, deserialize_with = "by_name")]
+    pub target_platform: Option<Platform>,
+    /// di-compile: the area-file layout (`--area-config`).
+    #[serde(default, deserialize_with = "by_name")]
+    pub area_config: Option<AreaLayout>,
     pub hardlink: Option<bool>,
     pub cache_root: Option<PathBuf>,
     pub themes: Option<Vec<String>>,
@@ -417,9 +442,18 @@ fn override_step(step: &mut BuiltinStep, spec: &NodeSpec) {
                 *hardlink = v;
             }
         }
-        BuiltinStep::DiCompile { fused } => {
+        BuiltinStep::DiCompile { fused, target } => {
             if let Some(v) = spec.fused {
                 *fused = v;
+            }
+            if let Some(v) = &spec.target_php {
+                target.php = Some(v.clone());
+            }
+            if let Some(v) = spec.target_platform {
+                target.platform = Some(v);
+            }
+            if let Some(v) = spec.area_config {
+                target.area_layout = Some(v);
             }
         }
         BuiltinStep::StaticDeploy {
@@ -545,7 +579,7 @@ mod tests {
         let (g, jobs) = resolve(&file, &BuildOptions::default(), Path::new(".")).unwrap();
         assert_eq!(jobs, 3);
         match &g.get("di-compile").unwrap().kind {
-            NodeKind::Native(BuiltinStep::DiCompile { fused }) => assert!(*fused),
+            NodeKind::Native(BuiltinStep::DiCompile { fused, .. }) => assert!(*fused),
             _ => panic!(),
         }
         match &g.get("static-deploy").unwrap().kind {
@@ -553,6 +587,56 @@ mod tests {
                 assert_eq!(locales, &vec!["en_US".to_string(), "nl_NL".to_string()]);
             }
             _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn di_compile_takes_the_compile_target() {
+        let file: FileConfig = toml::from_str(
+            r#"
+            [nodes.di-compile]
+            target_php = "8.3"
+            target_platform = "mageos-4.0"
+            area_config = "full"
+            "#,
+        )
+        .unwrap();
+        let (g, _) = resolve(&file, &BuildOptions::default(), Path::new(".")).unwrap();
+        match &g.get("di-compile").unwrap().kind {
+            NodeKind::Native(BuiltinStep::DiCompile { fused, target }) => {
+                assert!(!*fused);
+                assert_eq!(target.php.as_deref(), Some("8.3"));
+                assert_eq!(target.platform, Some(Platform::MageOs4_0));
+                assert_eq!(target.area_layout, Some(AreaLayout::Full));
+            }
+            _ => panic!(),
+        }
+        // Unset, each follows the checkout.
+        let (g, _) = resolve(
+            &FileConfig::default(),
+            &BuildOptions::default(),
+            Path::new("."),
+        )
+        .unwrap();
+        match &g.get("di-compile").unwrap().kind {
+            NodeKind::Native(BuiltinStep::DiCompile { target, .. }) => {
+                assert_eq!(target, &DiTarget::default());
+            }
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn di_compile_rejects_an_unknown_target_name() {
+        for (key, value) in [("target_platform", "mageos-3.6"), ("area_config", "diffs")] {
+            let err =
+                toml::from_str::<FileConfig>(&format!("[nodes.di-compile]\n{key} = {value:?}\n"))
+                    .unwrap_err()
+                    .to_string();
+            assert!(
+                err.contains(value) && err.contains("expected one of"),
+                "{key}: {err}"
+            );
         }
     }
 

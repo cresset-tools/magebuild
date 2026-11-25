@@ -48,6 +48,29 @@ pub enum Cost {
     IoBound,
 }
 
+/// What di-compile is told about the store where the checkout does not say:
+/// `magecommand di compile`'s `--target-php`, `--target-platform` and
+/// `--area-config`. Each unset one follows the checkout.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DiTarget {
+    /// The PHP version the store runs (`8.4`, `8.3.12`).
+    pub php: Option<String>,
+    /// The platform, instead of reading it off the checkout's `setup/`.
+    pub platform: Option<magecommand_engine::lazytypes::Platform>,
+    /// The area-file layout, instead of the platform's own.
+    pub area_layout: Option<magecommand_engine::arealayout::AreaLayout>,
+}
+
+impl DiTarget {
+    pub fn as_target(&self) -> magecommand_engine::lazytypes::Target<'_> {
+        magecommand_engine::lazytypes::Target {
+            php: self.php.as_deref(),
+            platform: self.platform,
+            area_layout: self.area_layout,
+        }
+    }
+}
+
 /// A built-in step with an in-process (linked) Rust implementation, except
 /// [`BuiltinStep::StaticDeploy`] — see its docs.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,7 +89,7 @@ pub enum BuiltinStep {
         hardlink: bool,
     },
     /// `setup:di:compile` (in-process via `magecommand-engine`).
-    DiCompile { fused: bool },
+    DiCompile { fused: bool, target: DiTarget },
     /// `setup:static-content:deploy` over the theme×locale×area matrix — an
     /// in-process linked call into `magecommand`'s `static_deploy` engine
     /// (`deploy::deploy_to_disk`), the same entry point the `magecommand static
@@ -140,8 +163,26 @@ impl BuiltinStep {
                     if *hardlink { " hardlink" } else { "" }
                 )
             }
-            BuiltinStep::DiCompile { fused } => {
-                format!("di-compile{}", if *fused { " --fused" } else { "" })
+            BuiltinStep::DiCompile { fused, target } => {
+                let mut label = format!("di-compile{}", if *fused { " --fused" } else { "" });
+                if let Some(php) = &target.php {
+                    label.push_str(&format!(" --target-php {php}"));
+                }
+                if let Some(platform) = target.platform {
+                    let name = magecommand_engine::lazytypes::Platform::ALL
+                        .iter()
+                        .find(|(_, p)| *p == platform)
+                        .map_or("?", |(n, _)| *n);
+                    label.push_str(&format!(" --target-platform {name}"));
+                }
+                if let Some(layout) = target.area_layout {
+                    let name = magecommand_engine::arealayout::AreaLayout::ALL
+                        .iter()
+                        .find(|(_, l)| *l == layout)
+                        .map_or("?", |(n, _)| *n);
+                    label.push_str(&format!(" --area-config {name}"));
+                }
+                label
             }
             BuiltinStep::StaticDeploy {
                 themes,
@@ -460,7 +501,10 @@ mod tests {
     use super::*;
 
     fn step() -> BuiltinStep {
-        BuiltinStep::DiCompile { fused: false }
+        BuiltinStep::DiCompile {
+            fused: false,
+            target: DiTarget::default(),
+        }
     }
 
     fn g(edges: &[(&str, &[&str])]) -> Graph {

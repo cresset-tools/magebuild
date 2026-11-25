@@ -94,6 +94,9 @@ jobs = 8
 
 [nodes.di-compile]
 fused = true                       # fused interceptors
+target_php = "8.3"                 # the PHP the store runs; else composer.json's config.platform.php
+target_platform = "mageos-4.0"     # magento-2.4.9, mageos-3.0, mageos-3.3, mageos-4.0; else read off setup/
+area_config = "full"               # "full" or "diff" (4.0+ only); else the platform's own
 
 [nodes.static-deploy]
 locales = ["en_US", "nl_NL"]
@@ -108,6 +111,13 @@ hardlink = true                    # see below — off by default
 after = ["composer-install"]
 run = "npm run build"
 ```
+
+The di-compile `target_*` and `area_config` settings are `magecommand di compile`'s
+`--target-php`, `--target-platform` and `--area-config`: for a build whose checkout
+doesn't say what the store runs. A platform name covers a range of releases, not one
+version. `area_config = "diff"` writes every area but global as its differences from
+global, which only a Mage-OS 4.0+ runtime can read; it's the 4.0 default, and
+di-compile refuses it for any other platform.
 
 `hardlink` (or the `MAGEBUILD_HARDLINK` env var) makes composer-install
 hard-link packages out of a decompress-once store instead of extracting on every
