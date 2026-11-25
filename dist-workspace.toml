@@ -94,7 +94,7 @@ Magento root with magebuild --root path/to/store --artifact release.tar.zst.
 """
 
 # The musl target builds libzstd (zstd-sys) with the musl-targeting C compiler.
-# `db-status` links magequery-core's MySQL client, whose build compiles C via
+# The deploy agent's upgrade checks link magequery-core's MySQL client, whose build compiles C via
 # CMake (mysql_common -> cc/cmake), as magequery's own release does.
 [dist.dependencies.apt]
 cmake = '*'

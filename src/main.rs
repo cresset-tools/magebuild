@@ -11,13 +11,10 @@
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 mod config;
-mod configstatus;
-mod dbstatus;
 mod deploy;
 mod graph;
 mod json;
 mod preflight;
-mod regstatus;
 mod render;
 mod scheduler;
 mod steps;
@@ -101,20 +98,6 @@ enum Command {
         /// The node id to build.
         id: String,
     },
-    /// Check whether the database needs `setup:upgrade` — a native
-    /// `bin/magento setup:db:status`. Exits 0 when up to date, 2 when an upgrade
-    /// is required, 1 on error.
-    DbStatus,
-    /// Whether `app:config:import` has work to do, as `bin/magento
-    /// app:config:status` decides it, without booting Magento: exits 2 when an
-    /// import is needed.
-    ConfigStatus,
-    /// Whether `setup:upgrade` has a theme to register: a native Mage-OS
-    /// `theme:registration:status`. Exits 2 when a theme is not registered.
-    ThemeStatus,
-    /// Whether `setup:upgrade` has a database queue to add: the MysqlMq part
-    /// of Mage-OS's `queue:config:status`. Exits 2 when a queue is missing.
-    QueueStatus,
     /// Ship a built artifact to the `[deploy]` host: one ssh session, a small
     /// agent on the host (uploaded only when that build is not there yet)
     /// doing the release, shared links, upgrade check, swap and cleanup.
@@ -165,18 +148,6 @@ fn run() -> Result<ExitCode> {
     let root = cli.root.clone().unwrap_or_else(|| PathBuf::from("."));
 
     // Not a build: no magebuild.toml, no graph.
-    if matches!(cli.command, Some(Command::DbStatus)) {
-        return dbstatus::run(&root, cli.json);
-    }
-    if matches!(cli.command, Some(Command::ConfigStatus)) {
-        return configstatus::run(&root, cli.json);
-    }
-    if matches!(cli.command, Some(Command::ThemeStatus)) {
-        return regstatus::themes(&root, cli.json);
-    }
-    if matches!(cli.command, Some(Command::QueueStatus)) {
-        return regstatus::queues(&root, cli.json);
-    }
     if matches!(cli.command, Some(Command::Agent)) {
         return Ok(deploy::agent::run());
     }

@@ -58,10 +58,6 @@ magebuild --artifact release.tar.zst   # also package (gzip/zstd chosen by exten
 magebuild plan                         # print the DAG + parallel schedule, run nothing
 magebuild node di-compile              # run one node and its dependencies
 magebuild --json                       # machine-readable output
-magebuild db-status                    # does the database need setup:upgrade?
-magebuild config-status                # does the config need app:config:import?
-magebuild theme-status                 # does setup:upgrade have a theme to register?
-magebuild queue-status                 # ... or a database queue to add?
 magebuild deploy --from release.tar.gz # ship a built release to the [deploy] host
 ```
 
@@ -200,9 +196,13 @@ task('magento:deploy:assets', function () {
 `--skip composer-install` when Deployer already installed the vendor tree; drop
 it to let magebuild install from `composer.lock` too.
 
-### Gating `setup:upgrade` with `db-status`
+### Gating `setup:upgrade` with `db status`
 
-`magebuild db-status` is a native `bin/magento setup:db:status`: it compares the
+The status checks below are [magecommand](https://github.com/cresset-tools/magequery)
+commands: magebuild runs them itself during `magebuild deploy`, and magecommand
+is the tool for running one on its own.
+
+`magecommand db status` is a native `bin/magento setup:db:status`: it compares the
 declarative schema, the setup patches and the module versions against the
 database named in `app/etc/env.php`, in tens of milliseconds rather than a
 framework bootstrap. It uses the same exit codes as Magento: 0 when the
@@ -210,15 +210,16 @@ database is up to date, 2 when an upgrade is required (including when the
 database is unreachable), 1 on an error such as a store that isn't installed.
 `--json` prints what differs.
 
-It runs on the deploy target, so put `magebuild` on that host's `PATH` (the
-curl installer above), then override the recipe's check in `deploy.php`:
+It runs on the deploy target, so put `magecommand` on that host's `PATH`
+(`curl -LsSf https://bougie.tools/magequery.sh | sh`), then override the
+recipe's check in `deploy.php`:
 
 ```php
 use Deployer\Exception\RunException;
 
 set('database_upgrade_needed', function () {
     try {
-        run('magebuild db-status --root {{release_or_current_path}}');
+        run('magecommand db status --root {{release_or_current_path}}');
     } catch (RunException $e) {
         if ($e->getExitCode() == 2) { // upgrade required
             return true;
@@ -230,9 +231,9 @@ set('database_upgrade_needed', function () {
 ```
 
 
-### Gating `app:config:import` with `config-status`
+### Gating `app:config:import` with `config status`
 
-`magebuild config-status` is a native `bin/magento app:config:status`. Like
+`magecommand config status` is a native `bin/magento app:config:status`. Like
 Magento, it hashes each imported section of the deployment config (`scopes`,
 `themes`, `system`, plus any section a module registers with `ImporterPool`)
 and compares it with the hash the last `app:config:import` stored in the `flag`
@@ -241,9 +242,9 @@ needed. It exits 1 on an error, and also when the config holds something it
 doesn't reproduce exactly (a PHP constant, an exponent-form float,
 `MAGENTO_DC__OVERRIDE`); run `bin/magento app:config:status` then. In
 `deploy.php`, the recipe's `config_import_needed` takes it the same way as
-`db-status` above.
+`db status` above.
 
-### Themes and queues: `theme-status` and `queue-status`
+### Themes and queues: `theme status` and `queue status`
 
 `setup:db:status` doesn't look at themes or message queues, so a release that
 only adds one of them looks up to date to it. Mage-OS added
@@ -251,9 +252,9 @@ only adds one of them looks up to date to it. Mage-OS added
 native versions with the same exit codes (0 when nothing is missing, 2 when
 `setup:upgrade` has something to register):
 
-- `theme-status` lists the themes that a `registration.php` declares but the
+- `magecommand theme status` lists the themes that a `registration.php` declares but the
   `theme` table doesn't hold;
-- `queue-status` lists the topology queues (`queue_topology.xml`, plus the
+- `magecommand queue status` lists the topology queues (`queue_topology.xml`, plus the
   older `queue.xml` when `Magento_Amqp` is enabled) missing from the `queue`
   table.
 
@@ -263,7 +264,7 @@ RabbitMQ keeps its own state, which these commands don't read. Instead,
 `communication.xml`), keeps the live release's fingerprint in
 `.dep/magebuild-amqp-topology`, and upgrades when it changes. On a store with
 RabbitMQ, the first deploy with this upgrades once. A queue deleted on the
-broker by hand goes unnoticed. `queue-status` prints the fingerprint.
+broker by hand goes unnoticed. `magecommand queue status` prints the fingerprint.
 ## Deploying (`magebuild deploy`)
 
 `magebuild deploy` replaces Deployer's deploy stage. It opens one ssh session
@@ -278,9 +279,9 @@ at a time, so a deploy costs one round trip instead of about a hundred:
    as it streams in (see "Sending only what changed" below);
 3. links `shared/` into the release, derives `app/etc/env.php` from a template
    with a fresh cache `id_prefix` per release, and sets writable dirs;
-4. checks natively whether the database needs an upgrade (`db-status`), the
-   config an import (`config-status`), and whether there is a theme to register
-   or a queue to set up (`theme-status`, `queue-status`, and the RabbitMQ
+4. checks natively whether the database needs an upgrade (`db status`), the
+   config an import (`config status`), and whether there is a theme to register
+   or a queue to set up (`theme status`, `queue status`, and the RabbitMQ
    topology fingerprint below), asking `bin/magento app:config:status` only when
    the config holds something the native check can't hash exactly;
 5. pauses cron, runs the import or upgrade only when needed (maintenance mode on
@@ -339,7 +340,7 @@ tmp_dir = "/var/www/tmp"                        # a dir php-fpm sees at the same
 ### Upgrading with the store open
 
 With `maintenance = "when-needed"`, the check also judges each declarative
-schema change (see `magebuild db-status`): whether code written for the old
+schema change (see `magecommand db status`): whether code written for the old
 schema keeps working on the new one, and whether the server applies it without
 blocking writes. Added nullable columns, added indexes, new tables and longer
 varchars pass; dropped or renamed columns and tables, NOT NULL columns without

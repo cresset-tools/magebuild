@@ -12,7 +12,7 @@ description = "Build a Magento release as fast as possible — a parallel, DAG-o
 # Magento engines — git-pinned to cresset-tools/magequery (public repo), linked
 # in-process. di-compile: magecommand-engine (scan -> compute_outputs ->
 # write_generated); static-content-deploy: magecommand's static_deploy; Magento
-# discovery/index and `db-status`: magequery-core (its `db` feature adds the
+# discovery/index and the deploy agent's upgrade checks: magequery-core (its `db` feature adds the
 # pure-Rust mysql client).
 magequery-core = { git = "https://github.com/cresset-tools/magequery", rev = "34e09f286c8426330e4e052d0f90632985625855", features = ["db"] }
 magecommand-engine = { git = "https://github.com/cresset-tools/magequery", rev = "34e09f286c8426330e4e052d0f90632985625855" }
