@@ -45,7 +45,11 @@ fn run_builtin(step: &BuiltinStep, ctx: &Ctx) -> Result<()> {
             cache_root,
             hardlink,
         } => composer_install(&ctx.root, *no_dev, cache_root.as_deref(), *hardlink),
-        BuiltinStep::DiCompile { fused, target } => di_compile(&ctx.root, *fused, target),
+        BuiltinStep::DiCompile {
+            fused,
+            target,
+            gate,
+        } => di_compile(&ctx.root, *fused, target, gate),
         BuiltinStep::StaticDeploy {
             themes,
             locales,
@@ -57,6 +61,7 @@ fn run_builtin(step: &BuiltinStep, ctx: &Ctx) -> Result<()> {
             symlink,
             deployed_version,
             command,
+            fail_on,
         } => static_deploy(
             &ctx.root,
             themes,
@@ -69,6 +74,7 @@ fn run_builtin(step: &BuiltinStep, ctx: &Ctx) -> Result<()> {
             *symlink,
             deployed_version.as_deref(),
             command.as_deref(),
+            fail_on,
         ),
         BuiltinStep::AutoloadDump { no_dev, optimize } => {
             autoload_dump(&ctx.root, *no_dev, *optimize)
@@ -190,7 +196,12 @@ fn build_patch_plan(root: &Path, dist_cache: &Path) -> Result<Option<composer_pa
 /// runs (`lib.rs::compile`), including the from-empty bring-up nuance: the class
 /// universe scans the frozen `generated/_code` archive when present, else the
 /// live `generated/code` (which we clear first).
-fn di_compile(root: &Path, fused: bool, target: &crate::graph::DiTarget) -> Result<()> {
+fn di_compile(
+    root: &Path,
+    fused: bool,
+    target: &crate::graph::DiTarget,
+    gate: &crate::graph::DiGate,
+) -> Result<()> {
     // Magento's `BP` must be absolute (it is baked into generated regexes).
     let root = std::path::absolute(root).unwrap_or_else(|_| root.to_path_buf());
     let target = target.as_target();
@@ -206,6 +217,12 @@ Set target_platform = \"mageos-4.0\" if the store runs 4.0, or drop area_config.
 
     let magento = magequery_core::Magento::open(&root)
         .with_context(|| format!("not a Magento root: {}", root.display()))?;
+
+    // Doctor first, on the store just loaded: what it fails, nothing is
+    // generated for.
+    if let Some(policy) = &gate.doctor {
+        doctor(&magento, policy)?;
+    }
 
     // Clear the output tree first so stale artifacts don't leak into the scan
     // universe / class resolver (what `setup:di:compile` does).
@@ -223,9 +240,94 @@ Set target_platform = \"mageos-4.0\" if the store runs 4.0, or drop area_config.
         magecommand_engine::definitions::Definitions::scan(&magento, &root, &generated_code);
     let out =
         magecommand_engine::build::compute_outputs_with(&magento, &mut defs, &root, fused, &target);
+    // What setup:di:compile refuses fails the build, whatever the gate says.
+    if !out.rejections.is_empty() {
+        for r in &out.rejections {
+            eprintln!("  di-compile: error: {r}");
+        }
+        anyhow::bail!(
+            "di-compile: setup:di:compile refuses this configuration too ({} error(s)); nothing was written",
+            out.rejections.len()
+        );
+    }
     let written = magecommand_engine::metadata::write_generated(&root, &out.files)
         .context("writing generated/")?;
     eprintln!("  di-compile: wrote {written} generated/ file(s)");
+    if !out.lost_arguments.is_empty() {
+        eprintln!(
+            "  di-compile: warning: {} type(s) lose their di.xml arguments (their constructor \
+             could not be resolved statically, so Magento builds them by runtime reflection, \
+             which ignores di.xml):",
+            out.lost_arguments.len()
+        );
+        for (name, why) in &out.lost_arguments {
+            eprintln!("    {name}  ({why})");
+        }
+    }
+    if !out.findings.is_empty() {
+        eprintln!(
+            "  di-compile: note: {} compile finding(s), first: {}",
+            out.findings.len(),
+            out.findings[0]
+        );
+    }
+    use magecommand_engine::build::FailOn;
+    let failed: Vec<&str> = gate
+        .fail_on
+        .iter()
+        .filter(|kind| match kind {
+            FailOn::LostArguments => !out.lost_arguments.is_empty(),
+        })
+        .map(|kind| kind.name())
+        .collect();
+    if !failed.is_empty() {
+        anyhow::bail!("di-compile: fail_on = {failed:?}");
+    }
+    Ok(())
+}
+
+/// `magequery doctor` under the `[doctor]` section's policy: its findings,
+/// then an error when they fail the build.
+fn doctor(magento: &magequery_core::Magento, policy: &magequery_core::DoctorPolicy) -> Result<()> {
+    use magequery_core::Severity;
+    let check = magento
+        .doctor_check(policy)
+        .map_err(|e| anyhow::anyhow!("doctor: {e}"))?;
+    let root = magento.root();
+    for f in &check.report.findings {
+        let tag = match f.severity {
+            Severity::Error => "error",
+            Severity::Warning => "warn",
+            Severity::Info => "info",
+        };
+        let at = f.source.as_ref().map_or(String::new(), |s| {
+            let file = s.file.strip_prefix(root).unwrap_or(&s.file);
+            format!("  {}:{}", file.display(), s.line)
+        });
+        eprintln!("  doctor: {tag}[{}] {}{at}", f.code, f.message);
+    }
+    for s in check.stale() {
+        eprintln!(
+            "  doctor: error[baseline] {} \"{}\" is accepted {} time(s) but occurs {}",
+            s.entry.code, s.entry.message, s.entry.count, s.matched
+        );
+    }
+    eprintln!(
+        "  doctor: {} error(s), {} warning(s), {} info",
+        check.errors(),
+        check.report.warnings(),
+        check.report.infos()
+    );
+    if check.failed() {
+        anyhow::bail!(
+            "doctor: the [doctor] section fails the build on {}",
+            if check.errors() > 0 {
+                "its errors"
+            } else {
+                "warnings (fail_on_warnings)"
+            }
+        );
+    }
     Ok(())
 }
 
@@ -264,6 +366,7 @@ fn static_deploy(
     symlink: Symlink,
     deployed_version: Option<&str>,
     command: Option<&str>,
+    fail_on: &[crate::graph::DeployFailOn],
 ) -> Result<()> {
     // An explicit override wins — honor a bespoke deploy command verbatim.
     if let Some(cmd) = command {
@@ -374,6 +477,18 @@ fn static_deploy(
         bytes as f64 / (1024.0 * 1024.0),
         summary.elapsed.as_secs_f64(),
     );
+    use crate::graph::DeployFailOn;
+    let failed: Vec<&str> = fail_on
+        .iter()
+        .filter(|kind| match kind {
+            DeployFailOn::NotDeployed => !failed.is_empty(),
+            DeployFailOn::SkippedTheme => !summary.skipped.is_empty(),
+        })
+        .map(|kind| kind.name())
+        .collect();
+    if !failed.is_empty() {
+        anyhow::bail!("static-deploy: fail_on = {failed:?}");
+    }
     Ok(())
 }
 

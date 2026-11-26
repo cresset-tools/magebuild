@@ -71,6 +71,57 @@ impl DiTarget {
     }
 }
 
+/// What fails di-compile beyond what `setup:di:compile` itself refuses (which
+/// always does): `fail_on` results Magento accepts, and doctor's findings.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DiGate {
+    /// `[nodes.di-compile] fail_on`.
+    pub fail_on: Vec<magecommand_engine::build::FailOn>,
+    /// The `[doctor]` section: doctor runs on the store di-compile loads,
+    /// before anything is generated. `None` without the section.
+    pub doctor: Option<magequery_core::DoctorPolicy>,
+}
+
+/// What a static deploy completes without, that `[nodes.static-deploy]
+/// fail_on` can fail it on. `setup:static-content:deploy` exits 0 on both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DeployFailOn {
+    /// A stylesheet that did not compile, so is missing from `pub/static`.
+    NotDeployed,
+    /// A theme left out of the deploy because its parent chain is broken.
+    SkippedTheme,
+}
+
+impl DeployFailOn {
+    pub const ALL: [(DeployFailOn, &'static str); 2] = [
+        (DeployFailOn::NotDeployed, "not-deployed"),
+        (DeployFailOn::SkippedTheme, "skipped-theme"),
+    ];
+
+    pub fn name(self) -> &'static str {
+        Self::ALL
+            .iter()
+            .find(|(k, _)| *k == self)
+            .map(|(_, n)| *n)
+            .expect("every kind is named")
+    }
+}
+
+impl std::str::FromStr for DeployFailOn {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, String> {
+        Self::ALL
+            .iter()
+            .find(|(_, n)| *n == s)
+            .map(|(k, _)| *k)
+            .ok_or_else(|| {
+                let names: Vec<&str> = Self::ALL.iter().map(|(_, n)| *n).collect();
+                format!("unknown kind {s:?}, expected one of: {}", names.join(", "))
+            })
+    }
+}
+
 /// A built-in step with an in-process (linked) Rust implementation, except
 /// [`BuiltinStep::StaticDeploy`] — see its docs.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,7 +140,11 @@ pub enum BuiltinStep {
         hardlink: bool,
     },
     /// `setup:di:compile` (in-process via `magecommand-engine`).
-    DiCompile { fused: bool, target: DiTarget },
+    DiCompile {
+        fused: bool,
+        target: DiTarget,
+        gate: DiGate,
+    },
     /// `setup:static-content:deploy` over the theme×locale×area matrix — an
     /// in-process linked call into `magecommand`'s `static_deploy` engine
     /// (`deploy::deploy_to_disk`), the same entry point the `magecommand static
@@ -127,6 +182,8 @@ pub enum BuiltinStep {
         /// Shell-out override for a bespoke deploy invocation; `None` ⇒ the
         /// in-process engine call.
         command: Option<String>,
+        /// What the deploy completes without that fails the node anyway.
+        fail_on: Vec<DeployFailOn>,
     },
     /// `composer dump-autoload -o --no-dev` (in-process via `composer-autoload`).
     AutoloadDump { no_dev: bool, optimize: bool },
@@ -163,8 +220,18 @@ impl BuiltinStep {
                     if *hardlink { " hardlink" } else { "" }
                 )
             }
-            BuiltinStep::DiCompile { fused, target } => {
+            BuiltinStep::DiCompile {
+                fused,
+                target,
+                gate,
+            } => {
                 let mut label = format!("di-compile{}", if *fused { " --fused" } else { "" });
+                if gate.doctor.is_some() {
+                    label.push_str(" +doctor");
+                }
+                for kind in &gate.fail_on {
+                    label.push_str(&format!(" --fail-on {}", kind.name()));
+                }
                 if let Some(php) = &target.php {
                     label.push_str(&format!(" --target-php {php}"));
                 }
@@ -504,6 +571,7 @@ mod tests {
         BuiltinStep::DiCompile {
             fused: false,
             target: DiTarget::default(),
+            gate: DiGate::default(),
         }
     }
 
