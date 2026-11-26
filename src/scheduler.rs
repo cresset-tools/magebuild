@@ -264,7 +264,6 @@ mod tests {
             BuiltinStep::DiCompile {
                 fused: false,
                 target: crate::graph::DiTarget::default(),
-                gate: crate::graph::DiGate::default(),
             },
         )
     }

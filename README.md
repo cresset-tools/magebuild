@@ -57,7 +57,6 @@ magebuild --artifact release.tar.zst   # also package (gzip/zstd chosen by exten
 magebuild plan                         # print the DAG + parallel schedule, run nothing
 magebuild node di-compile              # run one node and its dependencies
 magebuild --json                       # machine-readable output
-magebuild --report build.json          # also write states, timings and diagnostics, for CI
 magebuild deploy --from release.tar.gz # ship a built release to the [deploy] host
 ```
 
@@ -98,18 +97,11 @@ fused = true                       # fused interceptors
 target_php = "8.3"                 # the PHP the store runs; else composer.json's config.platform.php
 target_platform = "mageos-4.0"     # magento-2.4.9, mageos-3.0, mageos-3.3, mageos-4.0; else read off setup/
 area_config = "full"               # "full" or "diff" (4.0+ only); else the platform's own
-fail_on = ["lost-arguments"]       # for a CI gate; see "Failing the build" below
 
 [nodes.static-deploy]
 locales = ["en_US", "nl_NL"]
 no_parent = true                   # don't deploy a theme's parent(s); see below
 symlink = "dir"                    # link instead of copying: "file" (= true) or "dir"; see below
-fail_on = ["not-deployed", "skipped-theme"]
-
-[doctor]                           # run magequery doctor before di-compile generates; present = on
-deny = ["E1004"]                   # these lints fail the build too (code or name)
-fail_on_warnings = false           # warnings fail the build too
-baseline = "magequery-baseline.json"
 
 [nodes.composer-install]
 hardlink = true                    # see below — off by default
@@ -183,44 +175,6 @@ The `MAGEBUILD_SYMLINK` env var turns linking on where the config leaves it off:
 `MAGEBUILD_SYMLINK=dir` for directory links, any other value for file links.
 Either way the serve-time web server must follow symlinks (nginx's default,
 `disable_symlinks off`).
-
-### Failing the build
-
-As a CI gate, a build should fail whenever the store would not work. Three things
-decide that:
-
-- **What `setup:di:compile` refuses, di-compile refuses too**, always, writing
-  nothing: a preference whose type isn't a class (or isn't compiled), and a plugin
-  class that doesn't exist. The error is Magento's, with the di.xml file and line.
-- **`fail_on`** fails a node on a result Magento's own command accepts but that
-  breaks the store at runtime. di-compile: `lost-arguments`, types whose di.xml
-  arguments the compiled config leaves out (Magento builds them by reflection
-  without them). static-deploy: `not-deployed`, a stylesheet that did not compile
-  and is missing from `pub/static`; `skipped-theme`, a theme left out because its
-  parent chain is broken. Unset, these are warnings, as with `bin/magento`.
-- **`[doctor]`** runs `magequery doctor` inside di-compile, on the store it has
-  already loaded, before anything is generated. Doctor's errors fail the build
-  (a used virtual type or an object argument naming a missing class, among the
-  rest); `deny`, `fail_on_warnings`, `baseline`, `source` and `in` are `magequery
-  doctor`'s flags of those names. It needs the built-in di-compile node.
-
-`--report <file.json>` writes the run as data for CI, failed or not: each node's
-state, duration and the diagnostics its step found, each with a `kind`
-(`rejected`, `lost-arguments`, `compile-finding`, `doctor`, `doctor-baseline`;
-`not-deployed`, `skipped-theme`, `less-warning`), a `severity` (`error` for what
-failed the build), the `message`, and where known a `code` (doctor's `E2006`, a
-rejection's `preference-missing`), `subject`, root-relative `file` and `line`,
-`areas`, `theme` and `locale`. A build that fails before any node starts writes
-one too, with the reason as the top-level `error` and no nodes.
-
-```json
-{ "version": 1, "failed": true, "wall_ms": 812,
-  "nodes": [ { "id": "di-compile", "state": "failed", "duration_ms": 640,
-               "error": "di-compile: setup:di:compile refuses this configuration too (1 error(s)); nothing was written",
-               "diagnostics": [ { "kind": "rejected", "severity": "error", "code": "preference-missing",
-                                  "file": "app/code/Acme/Probe/etc/di.xml", "line": 3,
-                                  "message": "Preference declared for …, but the latter does not exist." } ] } ] }
-```
 
 ## Deployer integration
 

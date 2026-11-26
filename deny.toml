@@ -4,7 +4,4 @@
 # Every ignored advisory needs a reason that says why it does not apply or
 # what has to happen before the entry can go.
 [advisories]
-ignore = [
-    { id = "RUSTSEC-2026-0194", reason = "quick-xml 0.36 arrives through magecommand-engine and only parses the XML of the project being built. Remove once magequery moves to quick-xml 0.41 or later" },
-    { id = "RUSTSEC-2026-0195", reason = "quick-xml 0.36 arrives through magecommand-engine and only parses the XML of the project being built. Remove once magequery moves to quick-xml 0.41 or later" },
-]
+ignore = []

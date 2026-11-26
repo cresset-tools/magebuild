@@ -1,18 +1,5 @@
 # Changelog
 
-## [0.19.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.18.2...magebuild-v0.19.0) (2026-11-26)
-
-
-### ⚠ BREAKING CHANGES
-
-* **magebuild:** `magebuild db-status`, `config-status`, `theme-status` and `queue-status` are removed; use `magecommand db status`, `config status`, `theme status` and `queue status`.
-
-### Features
-
-* **magebuild:** drop the status commands for magecommand's ([af396f8](https://github.com/cresset-tools/magebuild/commit/af396f8327005b46461f942a3df1e004b123187f))
-* **magebuild:** fail the build on what breaks the store ([3814daf](https://github.com/cresset-tools/magebuild/commit/3814dafa65dd1f7b13f216a1c74cc0c403ebc906))
-* **magebuild:** take di-compile's target PHP, platform and area layout ([ab0f7e6](https://github.com/cresset-tools/magebuild/commit/ab0f7e6d33ea1ff5f1ef9c9c3c0f256e7f6591c5))
-
 ## [0.18.2](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.18.1...magebuild-v0.18.2) (2026-11-24)
 
 
