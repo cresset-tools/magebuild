@@ -12,8 +12,9 @@ use serde::Deserialize;
 
 use magecommand_engine::arealayout::AreaLayout;
 use magecommand_engine::lazytypes::Platform;
+use magequery_core::{BaselineChoice, DoctorLint, DoctorPolicy};
 
-use crate::graph::{BuiltinStep, DiTarget, Graph, Node, NodeKind, Symlink, When};
+use crate::graph::{BuiltinStep, DiGate, DiTarget, Graph, Node, NodeKind, Symlink, When};
 
 /// A named bundle of graph presets — a one-flag shortcut for a common stack's
 /// build shape. Applied over the built-in defaults but UNDER `magebuild.toml`,
@@ -61,6 +62,7 @@ pub fn default_graph() -> Graph {
             BuiltinStep::DiCompile {
                 fused: false,
                 target: DiTarget::default(),
+                gate: DiGate::default(),
             },
         ),
         Node::native(
@@ -85,6 +87,7 @@ pub fn default_graph() -> Graph {
                 symlink: Symlink::Off,
                 deployed_version: None,
                 command: None,
+                fail_on: Vec::new(),
             },
         ),
         // `package` starts inactive; `--artifact` (or toml) turns it on.
@@ -110,6 +113,66 @@ pub struct FileConfig {
     pub nodes: BTreeMap<String, NodeSpec>,
     /// `[deploy]` — how `magebuild deploy` ships a built artifact to a host.
     pub deploy: Option<crate::deploy::config::DeploySection>,
+    /// `[doctor]` — run `magequery doctor` inside di-compile, on the store it
+    /// loads, before anything is generated. Present is on.
+    pub doctor: Option<DoctorSection>,
+}
+
+/// `[doctor]`: `magequery doctor`'s flags, which decide what fails the build.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct DoctorSection {
+    /// Lints whose findings fail the build, by code (`E1004`) or name
+    /// (`module-disabled`); doctor's errors always do.
+    #[serde(default, deserialize_with = "lints")]
+    pub deny: Vec<DoctorLint>,
+    /// Warnings fail the build too.
+    #[serde(default)]
+    pub fail_on_warnings: bool,
+    /// The baseline file, relative to the project root. Default
+    /// `magequery-baseline.json` there, when it exists.
+    pub baseline: Option<PathBuf>,
+    /// Only findings declared in `app` (everything outside vendor/) or `vendor`.
+    #[serde(default, deserialize_with = "module_source")]
+    pub source: Option<magequery_core::model::ModuleSource>,
+    /// Only findings located here: a path prefix, a module or a vendor.
+    #[serde(default, rename = "in")]
+    pub in_scopes: Vec<String>,
+}
+
+impl DoctorSection {
+    fn policy(&self, root: &Path) -> DoctorPolicy {
+        DoctorPolicy {
+            source: self.source,
+            deny: self.deny.clone(),
+            in_scopes: self.in_scopes.clone(),
+            baseline: match &self.baseline {
+                Some(path) => BaselineChoice::File(root.join(path)),
+                None => BaselineChoice::Default,
+            },
+            fail_on_warnings: self.fail_on_warnings,
+        }
+    }
+}
+
+fn lints<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<DoctorLint>, D::Error> {
+    Vec::<String>::deserialize(d)?
+        .iter()
+        .map(|name| name.parse().map_err(serde::de::Error::custom))
+        .collect()
+}
+
+fn module_source<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<magequery_core::model::ModuleSource>, D::Error> {
+    use magequery_core::model::ModuleSource;
+    match String::deserialize(d)?.as_str() {
+        "app" => Ok(Some(ModuleSource::App)),
+        "vendor" => Ok(Some(ModuleSource::Vendor)),
+        other => Err(serde::de::Error::custom(format!(
+            "source = {other:?}: expected \"app\" or \"vendor\""
+        ))),
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -185,6 +248,10 @@ pub struct NodeSpec {
     pub deployed_version: Option<String>,
     pub exclude_from: Option<PathBuf>,
     pub output: Option<PathBuf>,
+    /// What fails the node beyond its own errors; the kinds depend on the node
+    /// (`lost-arguments` for di-compile, `not-deployed` and `skipped-theme`
+    /// for static-deploy).
+    pub fail_on: Option<Vec<String>>,
 }
 
 impl FileConfig {
@@ -215,6 +282,19 @@ pub fn resolve(file: &FileConfig, opts: &BuildOptions, root: &Path) -> Result<(G
     // Apply the toml node overrides/additions (sorted for determinism).
     for (id, spec) in &file.nodes {
         apply_spec(&mut graph, id, spec)?;
+    }
+
+    // [doctor] runs inside di-compile: the store is loaded there already.
+    if let Some(doctor) = &file.doctor {
+        match graph.get_mut("di-compile").map(|n| &mut n.kind) {
+            Some(NodeKind::Native(BuiltinStep::DiCompile { gate, .. })) => {
+                gate.doctor = Some(doctor.policy(root));
+            }
+            _ => bail!(
+                "[doctor] runs inside the built-in di-compile node, which this build replaces \
+                 or removes; drop [doctor], or run `magequery doctor` as a node of its own"
+            ),
+        }
     }
 
     // CLI: --artifact activates `package` and sets its output; --exclude-from
@@ -417,7 +497,7 @@ fn apply_spec(graph: &mut Graph, id: &str, spec: &NodeSpec) -> Result<()> {
     // Field overrides on the built-in step.
     let node = graph.get_mut(id).unwrap();
     if let NodeKind::Native(step) = &mut node.kind {
-        override_step(step, spec);
+        override_step(step, spec).with_context(|| format!("[nodes.{id}]"))?;
         if matches!(step, BuiltinStep::Package { .. }) && spec.output.is_some() {
             node.when = When::Always;
         }
@@ -425,7 +505,15 @@ fn apply_spec(graph: &mut Graph, id: &str, spec: &NodeSpec) -> Result<()> {
     Ok(())
 }
 
-fn override_step(step: &mut BuiltinStep, spec: &NodeSpec) {
+fn override_step(step: &mut BuiltinStep, spec: &NodeSpec) -> Result<()> {
+    if spec.fail_on.is_some()
+        && !matches!(
+            step,
+            BuiltinStep::DiCompile { .. } | BuiltinStep::StaticDeploy { .. }
+        )
+    {
+        bail!("fail_on: only di-compile and static-deploy have results to fail on");
+    }
     match step {
         BuiltinStep::ComposerInstall {
             no_dev,
@@ -442,7 +530,14 @@ fn override_step(step: &mut BuiltinStep, spec: &NodeSpec) {
                 *hardlink = v;
             }
         }
-        BuiltinStep::DiCompile { fused, target } => {
+        BuiltinStep::DiCompile {
+            fused,
+            target,
+            gate,
+        } => {
+            if let Some(kinds) = &spec.fail_on {
+                gate.fail_on = parse_kinds(kinds)?;
+            }
             if let Some(v) = spec.fused {
                 *fused = v;
             }
@@ -466,8 +561,12 @@ fn override_step(step: &mut BuiltinStep, spec: &NodeSpec) {
             no_html_minify,
             symlink,
             deployed_version,
+            fail_on,
             ..
         } => {
+            if let Some(kinds) = &spec.fail_on {
+                *fail_on = parse_kinds(kinds)?;
+            }
             if let Some(v) = &spec.themes {
                 *themes = v.clone();
             }
@@ -516,6 +615,17 @@ fn override_step(step: &mut BuiltinStep, spec: &NodeSpec) {
             }
         }
     }
+    Ok(())
+}
+
+fn parse_kinds<T: std::str::FromStr<Err = String>>(names: &[String]) -> Result<Vec<T>> {
+    names
+        .iter()
+        .map(|name| {
+            name.parse()
+                .map_err(|e: String| anyhow::anyhow!("fail_on: {e}"))
+        })
+        .collect()
 }
 
 /// Default parallelism: available CPUs (min 1).
@@ -529,6 +639,8 @@ pub fn default_jobs() -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::DeployFailOn;
+    use magecommand_engine::build::FailOn;
 
     #[test]
     fn default_graph_is_valid_and_shaped_right() {
@@ -603,7 +715,7 @@ mod tests {
         .unwrap();
         let (g, _) = resolve(&file, &BuildOptions::default(), Path::new(".")).unwrap();
         match &g.get("di-compile").unwrap().kind {
-            NodeKind::Native(BuiltinStep::DiCompile { fused, target }) => {
+            NodeKind::Native(BuiltinStep::DiCompile { fused, target, .. }) => {
                 assert!(!*fused);
                 assert_eq!(target.php.as_deref(), Some("8.3"));
                 assert_eq!(target.platform, Some(Platform::MageOs4_0));
@@ -770,5 +882,141 @@ mod tests {
         );
 
         std::fs::remove_dir_all(&base).ok();
+    }
+
+    fn di_gate(file: &FileConfig, root: &Path) -> DiGate {
+        let (g, _) = resolve(file, &BuildOptions::default(), root).unwrap();
+        match &g.get("di-compile").unwrap().kind {
+            NodeKind::Native(BuiltinStep::DiCompile { gate, .. }) => gate.clone(),
+            _ => panic!("di-compile is not a DiCompile step"),
+        }
+    }
+
+    #[test]
+    fn fail_on_is_per_node() {
+        let file: FileConfig = toml::from_str(
+            r#"
+            [nodes.di-compile]
+            fail_on = ["lost-arguments"]
+            [nodes.static-deploy]
+            fail_on = ["not-deployed", "skipped-theme"]
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            di_gate(&file, Path::new(".")).fail_on,
+            vec![FailOn::LostArguments]
+        );
+        let (g, _) = resolve(&file, &BuildOptions::default(), Path::new(".")).unwrap();
+        match &g.get("static-deploy").unwrap().kind {
+            NodeKind::Native(BuiltinStep::StaticDeploy { fail_on, .. }) => {
+                assert_eq!(
+                    fail_on,
+                    &vec![DeployFailOn::NotDeployed, DeployFailOn::SkippedTheme]
+                );
+            }
+            _ => panic!(),
+        }
+        // Unset, nothing beyond what Magento refuses fails the build.
+        assert!(
+            di_gate(&FileConfig::default(), Path::new("."))
+                .fail_on
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn fail_on_names_what_the_node_can_fail_on() {
+        for (node, kind, expected) in [
+            ("di-compile", "not-deployed", "lost-arguments"),
+            (
+                "static-deploy",
+                "lost-arguments",
+                "not-deployed, skipped-theme",
+            ),
+        ] {
+            let file: FileConfig =
+                toml::from_str(&format!("[nodes.{node}]\nfail_on = [{kind:?}]\n")).unwrap();
+            let err = format!(
+                "{:#}",
+                resolve(&file, &BuildOptions::default(), Path::new(".")).unwrap_err()
+            );
+            assert!(
+                err.contains(node) && err.contains(kind) && err.contains(expected),
+                "{err}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_doctor_section_runs_doctor_in_di_compile() {
+        let file: FileConfig = toml::from_str(
+            r#"
+            [doctor]
+            deny = ["E1004", "module-not-registered"]
+            fail_on_warnings = true
+            baseline = "ci/doctor-baseline.json"
+            source = "app"
+            in = ["Acme"]
+            "#,
+        )
+        .unwrap();
+        let policy = di_gate(&file, Path::new("/srv/shop"))
+            .doctor
+            .expect("doctor runs");
+        assert_eq!(
+            policy.deny,
+            vec![DoctorLint::ModuleDisabled, DoctorLint::ModuleNotRegistered]
+        );
+        assert!(policy.fail_on_warnings);
+        assert_eq!(
+            policy.baseline,
+            BaselineChoice::File(PathBuf::from("/srv/shop/ci/doctor-baseline.json")),
+            "relative to the project root"
+        );
+        assert_eq!(
+            policy.source,
+            Some(magequery_core::model::ModuleSource::App)
+        );
+        assert_eq!(policy.in_scopes, vec!["Acme".to_string()]);
+
+        let bare: FileConfig = toml::from_str("[doctor]\n").unwrap();
+        assert_eq!(
+            di_gate(&bare, Path::new(".")).doctor,
+            Some(DoctorPolicy::default()),
+            "present is on"
+        );
+        assert_eq!(
+            di_gate(&FileConfig::default(), Path::new(".")).doctor,
+            None,
+            "absent is off"
+        );
+    }
+
+    #[test]
+    fn the_doctor_section_rejects_what_doctor_does_not_know() {
+        for toml in [
+            "[doctor]\ndeny = [\"E9999\"]\n",
+            "[doctor]\nsource = \"lib\"\n",
+            "[doctor]\nstrict = true\n",
+        ] {
+            assert!(toml::from_str::<FileConfig>(toml).is_err(), "{toml}");
+        }
+    }
+
+    #[test]
+    fn doctor_needs_the_built_in_di_compile() {
+        let file: FileConfig = toml::from_str(
+            "[doctor]\n[nodes.di-compile]\nrun = \"bin/magento setup:di:compile\"\n",
+        )
+        .unwrap();
+        let err = format!(
+            "{:#}",
+            resolve(&file, &BuildOptions::default(), Path::new(".")).unwrap_err()
+        );
+        assert!(
+            err.contains("[doctor]") && err.contains("di-compile"),
+            "{err}"
+        );
     }
 }
