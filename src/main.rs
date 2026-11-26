@@ -16,6 +16,7 @@ mod graph;
 mod json;
 mod preflight;
 mod render;
+mod report;
 mod scheduler;
 mod steps;
 
@@ -41,6 +42,13 @@ struct Cli {
     /// Emit machine-readable JSON.
     #[arg(long, global = true)]
     json: bool,
+
+    /// Also write the run to this JSON file: each node's state, duration and
+    /// diagnostics (kind, severity, file, line, area/theme/locale, message), for
+    /// CI to gate on and annotate with. Written even when the build fails before
+    /// a node starts.
+    #[arg(long, global = true, value_name = "FILE")]
+    report: Option<PathBuf>,
 
     /// Path to magebuild.toml (default: <root>/magebuild.toml).
     #[arg(long, global = true)]
@@ -134,17 +142,29 @@ enum Command {
 }
 
 fn main() -> ExitCode {
-    match run() {
+    let cli = Cli::parse();
+    let report = cli.report.clone();
+    match run(cli) {
         Ok(code) => code,
         Err(e) => {
             eprintln!("error: {e:#}");
+            if let Some(path) = &report {
+                write_report(path, &report::of_error(&format!("{e:#}")));
+            }
             ExitCode::FAILURE
         }
     }
 }
 
-fn run() -> Result<ExitCode> {
-    let cli = Cli::parse();
+/// Write `--report`; a failure to is reported, not fatal: the build's own
+/// outcome is what the exit code says.
+fn write_report(path: &std::path::Path, json: &json::Json) {
+    if let Err(e) = std::fs::write(path, json.to_pretty()) {
+        eprintln!("error: writing the report to {}: {e}", path.display());
+    }
+}
+
+fn run(cli: Cli) -> Result<ExitCode> {
     let root = cli.root.clone().unwrap_or_else(|| PathBuf::from("."));
 
     // Not a build: no magebuild.toml, no graph.
@@ -254,6 +274,7 @@ fn run() -> Result<ExitCode> {
     let ctx = Arc::new(Ctx {
         root: std::path::absolute(&root).unwrap_or(root),
         jobs,
+        diagnostics: report::Diagnostics::default(),
     });
     let runner: Arc<Runner> = {
         let ctx = ctx.clone();
@@ -266,6 +287,9 @@ fn run() -> Result<ExitCode> {
     };
 
     let report = scheduler::run(&graph, jobs, runner, observer);
+    if let Some(path) = &cli.report {
+        write_report(path, &report::of_run(&report, &ctx.diagnostics));
+    }
 
     if cli.json {
         print!("{}", render::summary_json(&report).to_pretty());
