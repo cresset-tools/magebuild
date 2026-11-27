@@ -1,17 +1,5 @@
 # Changelog
 
-## [0.20.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.19.0...magebuild-v0.20.0) (2026-11-27)
-
-
-### Features
-
-* **magebuild:** --report, the build as JSON for CI ([73f37ac](https://github.com/cresset-tools/magebuild/commit/73f37ac90f7f08943b1641d67f299ed27c4eed7a))
-
-
-### Bug Fixes
-
-* **magebuild:** restore Magento root files missing from the source tree ([1116853](https://github.com/cresset-tools/magebuild/commit/1116853d24038c18db4f859b5a846bfaf36d4350))
-
 ## [0.19.0](https://github.com/cresset-tools/magebuild/compare/magebuild-v0.18.2...magebuild-v0.19.0) (2026-11-26)
 
 

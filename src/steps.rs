@@ -22,27 +22,23 @@ use sha2::{Digest, Sha256};
 
 use crate::deploy::manifest;
 use crate::graph::{BuiltinStep, Node, NodeKind, Symlink};
-use crate::report::{Diagnostic, Diagnostics, Severity};
 
 /// Shared execution context: the project root every step operates on, and the
 /// job budget (used by the packaging step to size its parallel-gzip pool).
 pub struct Ctx {
     pub root: PathBuf,
     pub jobs: usize,
-    /// What each node found, for `--report`.
-    pub diagnostics: Diagnostics,
 }
 
 /// Run one node to completion. `Err` = the node failed.
 pub fn execute(node: &Node, ctx: &Ctx) -> Result<()> {
-    let diag = |d: Diagnostic| ctx.diagnostics.push(&node.id, d);
     match &node.kind {
-        NodeKind::Native(step) => run_builtin(step, ctx, &diag),
+        NodeKind::Native(step) => run_builtin(step, ctx),
         NodeKind::Command { run, cwd, env } => run_command(run, cwd.as_deref(), env, &ctx.root),
     }
 }
 
-fn run_builtin(step: &BuiltinStep, ctx: &Ctx, diag: &dyn Fn(Diagnostic)) -> Result<()> {
+fn run_builtin(step: &BuiltinStep, ctx: &Ctx) -> Result<()> {
     match step {
         BuiltinStep::ComposerInstall {
             no_dev,
@@ -53,7 +49,7 @@ fn run_builtin(step: &BuiltinStep, ctx: &Ctx, diag: &dyn Fn(Diagnostic)) -> Resu
             fused,
             target,
             gate,
-        } => di_compile(&ctx.root, *fused, target, gate, diag),
+        } => di_compile(&ctx.root, *fused, target, gate),
         BuiltinStep::StaticDeploy {
             themes,
             locales,
@@ -79,7 +75,6 @@ fn run_builtin(step: &BuiltinStep, ctx: &Ctx, diag: &dyn Fn(Diagnostic)) -> Resu
             deployed_version.as_deref(),
             command.as_deref(),
             fail_on,
-            diag,
         ),
         BuiltinStep::AutoloadDump { no_dev, optimize } => {
             autoload_dump(&ctx.root, *no_dev, *optimize)
@@ -206,7 +201,6 @@ fn di_compile(
     fused: bool,
     target: &crate::graph::DiTarget,
     gate: &crate::graph::DiGate,
-    diag: &dyn Fn(Diagnostic),
 ) -> Result<()> {
     // Magento's `BP` must be absolute (it is baked into generated regexes).
     let root = std::path::absolute(root).unwrap_or_else(|_| root.to_path_buf());
@@ -227,7 +221,7 @@ Set target_platform = \"mageos-4.0\" if the store runs 4.0, or drop area_config.
     // Doctor first, on the store just loaded: what it fails, nothing is
     // generated for.
     if let Some(policy) = &gate.doctor {
-        doctor(&magento, policy, diag)?;
+        doctor(&magento, policy)?;
     }
 
     // Clear the output tree first so stale artifacts don't leak into the scan
@@ -250,12 +244,6 @@ Set target_platform = \"mageos-4.0\" if the store runs 4.0, or drop area_config.
     if !out.rejections.is_empty() {
         for r in &out.rejections {
             eprintln!("  di-compile: error: {r}");
-            let mut d = Diagnostic::new("rejected", Severity::Error, r.message());
-            d.code = Some(r.kind.name().to_owned());
-            d.file = Some(r.file.clone());
-            d.line = r.line;
-            d.areas = r.areas.clone();
-            diag(d);
         }
         anyhow::bail!(
             "di-compile: setup:di:compile refuses this configuration too ({} error(s)); nothing was written",
@@ -265,16 +253,6 @@ Set target_platform = \"mageos-4.0\" if the store runs 4.0, or drop area_config.
     let written = magecommand_engine::metadata::write_generated(&root, &out.files)
         .context("writing generated/")?;
     eprintln!("  di-compile: wrote {written} generated/ file(s)");
-    use magecommand_engine::build::FailOn;
-    let lost_gated = gate.fail_on.contains(&FailOn::LostArguments);
-    for (name, why) in &out.lost_arguments {
-        let mut d = Diagnostic::new("lost-arguments", Severity::warning_unless(lost_gated), why);
-        d.subject = Some(name.clone());
-        diag(d);
-    }
-    for finding in &out.findings {
-        diag(Diagnostic::new("compile-finding", Severity::Info, finding));
-    }
     if !out.lost_arguments.is_empty() {
         eprintln!(
             "  di-compile: warning: {} type(s) lose their di.xml arguments (their constructor \
@@ -293,6 +271,7 @@ Set target_platform = \"mageos-4.0\" if the store runs 4.0, or drop area_config.
             out.findings[0]
         );
     }
+    use magecommand_engine::build::FailOn;
     let failed: Vec<&str> = gate
         .fail_on
         .iter()
@@ -309,56 +288,29 @@ Set target_platform = \"mageos-4.0\" if the store runs 4.0, or drop area_config.
 
 /// `magequery doctor` under the `[doctor]` section's policy: its findings,
 /// then an error when they fail the build.
-fn doctor(
-    magento: &magequery_core::Magento,
-    policy: &magequery_core::DoctorPolicy,
-    diag: &dyn Fn(Diagnostic),
-) -> Result<()> {
-    use magequery_core::Severity as Found;
+fn doctor(magento: &magequery_core::Magento, policy: &magequery_core::DoctorPolicy) -> Result<()> {
+    use magequery_core::Severity;
     let check = magento
         .doctor_check(policy)
         .map_err(|e| anyhow::anyhow!("doctor: {e}"))?;
     let root = magento.root();
     for f in &check.report.findings {
         let tag = match f.severity {
-            Found::Error => "error",
-            Found::Warning => "warn",
-            Found::Info => "info",
+            Severity::Error => "error",
+            Severity::Warning => "warn",
+            Severity::Info => "info",
         };
         let at = f.source.as_ref().map_or(String::new(), |s| {
             let file = s.file.strip_prefix(root).unwrap_or(&s.file);
             format!("  {}:{}", file.display(), s.line)
         });
         eprintln!("  doctor: {tag}[{}] {}{at}", f.code, f.message);
-        let severity = match f.severity {
-            Found::Error => Severity::Error,
-            Found::Warning => Severity::Warning,
-            Found::Info => Severity::Info,
-        };
-        let mut d = Diagnostic::new("doctor", severity, &f.message);
-        d.code = Some(f.code.to_owned());
-        d.subject = f.subject.clone();
-        if let Some(s) = &f.source {
-            d.file = Some(relative(&s.file, root));
-            d.line = s.line;
-        }
-        diag(d);
     }
-    let baseline_file = check
-        .baseline
-        .as_ref()
-        .map(|(_, path)| relative(path, root));
     for s in check.stale() {
-        let message = format!(
-            "{} \"{}\" is accepted {} time(s) but occurs {}",
+        eprintln!(
+            "  doctor: error[baseline] {} \"{}\" is accepted {} time(s) but occurs {}",
             s.entry.code, s.entry.message, s.entry.count, s.matched
         );
-        eprintln!("  doctor: error[baseline] {message}");
-        let mut d = Diagnostic::new("doctor-baseline", Severity::Error, message);
-        d.code = Some(s.entry.code.clone());
-        d.file = baseline_file.clone();
-        d.line = s.line;
-        diag(d);
     }
     eprintln!(
         "  doctor: {} error(s), {} warning(s), {} info",
@@ -377,14 +329,6 @@ fn doctor(
         );
     }
     Ok(())
-}
-
-/// `file` relative to `root`, `/`-separated, where it lies inside it.
-fn relative(file: &Path, root: &Path) -> String {
-    file.strip_prefix(root)
-        .unwrap_or(file)
-        .to_string_lossy()
-        .replace('\\', "/")
 }
 
 /// `composer dump-autoload -o --no-dev`, in-process. Run AFTER `di-compile` so
@@ -423,7 +367,6 @@ fn static_deploy(
     deployed_version: Option<&str>,
     command: Option<&str>,
     fail_on: &[crate::graph::DeployFailOn],
-    diag: &dyn Fn(Diagnostic),
 ) -> Result<()> {
     // An explicit override wins — honor a bespoke deploy command verbatim.
     if let Some(cmd) = command {
@@ -476,28 +419,6 @@ fn static_deploy(
     };
 
     let summary = sdd::deploy_to_disk(root, &req).map_err(|e| anyhow::anyhow!("{e:#}"))?;
-    for d in deploy_diagnostics(
-        summary
-            .skipped
-            .iter()
-            .map(|s| (s.id.as_str(), s.reason.as_str())),
-        summary.stats.iter().flat_map(|stat| {
-            stat.warnings.iter().map(move |(file, message)| {
-                (
-                    (
-                        stat.area.as_str(),
-                        stat.theme.as_str(),
-                        stat.locale.as_str(),
-                    ),
-                    file.as_str(),
-                    message.as_str(),
-                )
-            })
-        }),
-        fail_on,
-    ) {
-        diag(d);
-    }
 
     for s in &summary.skipped {
         eprintln!("  warning (scd): skipping theme {} — {}", s.id, s.reason);
@@ -569,46 +490,6 @@ fn static_deploy(
         anyhow::bail!("static-deploy: fail_on = {failed:?}");
     }
     Ok(())
-}
-
-/// static-deploy's diagnostics: each skipped theme `(id, reason)`, and each
-/// compiler warning `((area, theme, locale), file, message)`, which is a
-/// stylesheet left out when it starts "entry " and a warning on one that
-/// deployed otherwise. What `fail_on` gates is an error.
-fn deploy_diagnostics<'a>(
-    skipped: impl Iterator<Item = (&'a str, &'a str)>,
-    warnings: impl Iterator<Item = ((&'a str, &'a str, &'a str), &'a str, &'a str)>,
-    fail_on: &[crate::graph::DeployFailOn],
-) -> Vec<Diagnostic> {
-    use crate::graph::DeployFailOn;
-    let mut out = Vec::new();
-    for (id, reason) in skipped {
-        let gated = fail_on.contains(&DeployFailOn::SkippedTheme);
-        let mut d = Diagnostic::new("skipped-theme", Severity::warning_unless(gated), reason);
-        d.subject = Some(id.to_owned());
-        // `adminhtml/Vendor/theme`.
-        if let Some((area, theme)) = id.split_once('/') {
-            d.areas = vec![area.to_owned()];
-            d.theme = Some(theme.to_owned());
-        }
-        out.push(d);
-    }
-    for ((area, theme, locale), file, message) in warnings {
-        let failed = message.starts_with("entry ");
-        let (kind, severity) = if failed {
-            let gated = fail_on.contains(&DeployFailOn::NotDeployed);
-            ("not-deployed", Severity::warning_unless(gated))
-        } else {
-            ("less-warning", Severity::Info)
-        };
-        let mut d = Diagnostic::new(kind, severity, message);
-        d.file = Some(file.to_owned());
-        d.areas = vec![area.to_owned()];
-        d.theme = Some(theme.to_owned());
-        d.locale = Some(locale.to_owned());
-        out.push(d);
-    }
-    out
 }
 
 /// A `sh -c` subprocess node.
@@ -1085,49 +966,6 @@ impl ExcludeMatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn static_deploy_diagnostics_name_their_package_and_follow_fail_on() {
-        use crate::graph::DeployFailOn;
-        let skipped = [("frontend/Acme/broken", "parent Acme/gone is not installed")];
-        let warnings = [
-            (
-                ("frontend", "Acme/shop", "en_US"),
-                "css/styles-m.css",
-                "entry css/styles-m.less: undefined variable",
-            ),
-            (
-                ("frontend", "Acme/shop", "nl_NL"),
-                "css/print.css",
-                "deprecated syntax",
-            ),
-        ];
-        let all = |fail_on: &[DeployFailOn]| {
-            deploy_diagnostics(skipped.iter().copied(), warnings.iter().copied(), fail_on)
-        };
-        let by_kind =
-            |ds: &[Diagnostic], kind: &str| ds.iter().find(|d| d.kind == kind).cloned().unwrap();
-
-        let ds = all(&[]);
-        let theme = by_kind(&ds, "skipped-theme");
-        assert_eq!(theme.severity, Severity::Warning);
-        assert_eq!(theme.areas, ["frontend"]);
-        assert_eq!(theme.theme.as_deref(), Some("Acme/broken"));
-        let missing = by_kind(&ds, "not-deployed");
-        assert_eq!(missing.severity, Severity::Warning);
-        assert_eq!(missing.file.as_deref(), Some("css/styles-m.css"));
-        assert_eq!(missing.locale.as_deref(), Some("en_US"));
-        assert_eq!(by_kind(&ds, "less-warning").severity, Severity::Info);
-
-        let ds = all(&[DeployFailOn::NotDeployed, DeployFailOn::SkippedTheme]);
-        assert_eq!(by_kind(&ds, "skipped-theme").severity, Severity::Error);
-        assert_eq!(by_kind(&ds, "not-deployed").severity, Severity::Error);
-        assert_eq!(
-            by_kind(&ds, "less-warning").severity,
-            Severity::Info,
-            "never gated"
-        );
-    }
 
     #[test]
     fn the_package_step_writes_the_manifest_a_deploy_would_read() {
