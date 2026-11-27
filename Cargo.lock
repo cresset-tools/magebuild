@@ -485,8 +485,8 @@ dependencies = [
 
 [[package]]
 name = "composer-autoload"
-version = "0.1.1"
-source = "git+https://github.com/cresset-tools/composer-client?rev=bead5066e494fc98eb293fc66b019e8c07d45d9b#bead5066e494fc98eb293fc66b019e8c07d45d9b"
+version = "0.1.2"
+source = "git+https://github.com/cresset-tools/composer-client?rev=4365645661c887281bb21c78dc6261cec209166d#4365645661c887281bb21c78dc6261cec209166d"
 dependencies = [
  "composer-installers",
  "composer-php-json",
@@ -503,8 +503,8 @@ dependencies = [
 
 [[package]]
 name = "composer-install"
-version = "0.6.1"
-source = "git+https://github.com/cresset-tools/composer-client?rev=bead5066e494fc98eb293fc66b019e8c07d45d9b#bead5066e494fc98eb293fc66b019e8c07d45d9b"
+version = "0.6.2"
+source = "git+https://github.com/cresset-tools/composer-client?rev=4365645661c887281bb21c78dc6261cec209166d#4365645661c887281bb21c78dc6261cec209166d"
 dependencies = [
  "composer-auth",
  "composer-autoload",
@@ -527,8 +527,8 @@ dependencies = [
 
 [[package]]
 name = "composer-installers"
-version = "0.2.0"
-source = "git+https://github.com/cresset-tools/composer-client?rev=bead5066e494fc98eb293fc66b019e8c07d45d9b#bead5066e494fc98eb293fc66b019e8c07d45d9b"
+version = "0.3.0"
+source = "git+https://github.com/cresset-tools/composer-client?rev=4365645661c887281bb21c78dc6261cec209166d#4365645661c887281bb21c78dc6261cec209166d"
 dependencies = [
  "eyre",
  "serde_json",
@@ -537,7 +537,7 @@ dependencies = [
 [[package]]
 name = "composer-manifest"
 version = "0.2.1"
-source = "git+https://github.com/cresset-tools/composer-client?rev=bead5066e494fc98eb293fc66b019e8c07d45d9b#bead5066e494fc98eb293fc66b019e8c07d45d9b"
+source = "git+https://github.com/cresset-tools/composer-client?rev=4365645661c887281bb21c78dc6261cec209166d#4365645661c887281bb21c78dc6261cec209166d"
 dependencies = [
  "composer-php-json",
  "composer-semver",
@@ -551,8 +551,8 @@ dependencies = [
 
 [[package]]
 name = "composer-patches"
-version = "0.2.1"
-source = "git+https://github.com/cresset-tools/composer-client?rev=bead5066e494fc98eb293fc66b019e8c07d45d9b#bead5066e494fc98eb293fc66b019e8c07d45d9b"
+version = "0.2.2"
+source = "git+https://github.com/cresset-tools/composer-client?rev=4365645661c887281bb21c78dc6261cec209166d#4365645661c887281bb21c78dc6261cec209166d"
 dependencies = [
  "composer-installers",
  "eyre",
@@ -2747,7 +2747,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
@@ -2786,7 +2786,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "tracing",
  "windows-sys 0.61.2",
 ]
@@ -3433,7 +3433,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",

@@ -22,9 +22,9 @@ magecommand = { git = "https://github.com/cresset-tools/magequery", rev = "cabe1
 # there is usable as soon as it lands, without waiting on a crates.io release.
 # composer-install (install-from-lock), composer-autoload (optimized
 # dump-autoload), composer-patches (cweagans-style patches).
-composer-install = { git = "https://github.com/cresset-tools/composer-client", rev = "bead5066e494fc98eb293fc66b019e8c07d45d9b" }
-composer-autoload = { git = "https://github.com/cresset-tools/composer-client", rev = "bead5066e494fc98eb293fc66b019e8c07d45d9b" }
-composer-patches = { git = "https://github.com/cresset-tools/composer-client", rev = "bead5066e494fc98eb293fc66b019e8c07d45d9b" }
+composer-install = { git = "https://github.com/cresset-tools/composer-client", rev = "4365645661c887281bb21c78dc6261cec209166d" }
+composer-autoload = { git = "https://github.com/cresset-tools/composer-client", rev = "4365645661c887281bb21c78dc6261cec209166d" }
+composer-patches = { git = "https://github.com/cresset-tools/composer-client", rev = "4365645661c887281bb21c78dc6261cec209166d" }
 
 # CLI + orchestration.
 clap = { version = "4", features = ["derive"] }
