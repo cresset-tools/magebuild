@@ -57,7 +57,6 @@ magebuild --artifact release.tar.zst   # also package (gzip/zstd chosen by exten
 magebuild plan                         # print the DAG + parallel schedule, run nothing
 magebuild node di-compile              # run one node and its dependencies
 magebuild --json                       # machine-readable output
-magebuild --report build.json          # also write states, timings and diagnostics, for CI
 magebuild deploy --from release.tar.gz # ship a built release to the [deploy] host
 ```
 
@@ -203,24 +202,6 @@ decide that:
   (a used virtual type or an object argument naming a missing class, among the
   rest); `deny`, `fail_on_warnings`, `baseline`, `source` and `in` are `magequery
   doctor`'s flags of those names. It needs the built-in di-compile node.
-
-`--report <file.json>` writes the run as data for CI, failed or not: each node's
-state, duration and the diagnostics its step found, each with a `kind`
-(`rejected`, `lost-arguments`, `compile-finding`, `doctor`, `doctor-baseline`;
-`not-deployed`, `skipped-theme`, `less-warning`), a `severity` (`error` for what
-failed the build), the `message`, and where known a `code` (doctor's `E2006`, a
-rejection's `preference-missing`), `subject`, root-relative `file` and `line`,
-`areas`, `theme` and `locale`. A build that fails before any node starts writes
-one too, with the reason as the top-level `error` and no nodes.
-
-```json
-{ "version": 1, "failed": true, "wall_ms": 812,
-  "nodes": [ { "id": "di-compile", "state": "failed", "duration_ms": 640,
-               "error": "di-compile: setup:di:compile refuses this configuration too (1 error(s)); nothing was written",
-               "diagnostics": [ { "kind": "rejected", "severity": "error", "code": "preference-missing",
-                                  "file": "app/code/Acme/Probe/etc/di.xml", "line": 3,
-                                  "message": "Preference declared for …, but the latter does not exist." } ] } ] }
-```
 
 ## Deployer integration
 
