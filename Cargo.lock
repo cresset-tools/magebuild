@@ -1757,8 +1757,8 @@ dependencies = [
 
 [[package]]
 name = "magecommand"
-version = "0.29.0"
-source = "git+https://github.com/cresset-tools/magequery?rev=cabe1eede86528540f8f646e8702b394f37b6799#cabe1eede86528540f8f646e8702b394f37b6799"
+version = "0.30.0"
+source = "git+https://github.com/cresset-tools/magequery?rev=40c0103ed5c994e6ca0d85a76f7b22a796c6763e#40c0103ed5c994e6ca0d85a76f7b22a796c6763e"
 dependencies = [
  "anstyle",
  "anyhow",
@@ -1785,8 +1785,8 @@ dependencies = [
 
 [[package]]
 name = "magecommand-engine"
-version = "0.29.0"
-source = "git+https://github.com/cresset-tools/magequery?rev=cabe1eede86528540f8f646e8702b394f37b6799#cabe1eede86528540f8f646e8702b394f37b6799"
+version = "0.30.0"
+source = "git+https://github.com/cresset-tools/magequery?rev=40c0103ed5c994e6ca0d85a76f7b22a796c6763e#40c0103ed5c994e6ca0d85a76f7b22a796c6763e"
 dependencies = [
  "blake3",
  "magecommand-php",
@@ -1802,8 +1802,8 @@ dependencies = [
 
 [[package]]
 name = "magecommand-less"
-version = "0.29.0"
-source = "git+https://github.com/cresset-tools/magequery?rev=cabe1eede86528540f8f646e8702b394f37b6799#cabe1eede86528540f8f646e8702b394f37b6799"
+version = "0.30.0"
+source = "git+https://github.com/cresset-tools/magequery?rev=40c0103ed5c994e6ca0d85a76f7b22a796c6763e#40c0103ed5c994e6ca0d85a76f7b22a796c6763e"
 dependencies = [
  "cssparser 0.37.0",
  "fancy-regex",
@@ -1814,16 +1814,16 @@ dependencies = [
 
 [[package]]
 name = "magecommand-php"
-version = "0.29.0"
-source = "git+https://github.com/cresset-tools/magequery?rev=cabe1eede86528540f8f646e8702b394f37b6799#cabe1eede86528540f8f646e8702b394f37b6799"
+version = "0.30.0"
+source = "git+https://github.com/cresset-tools/magequery?rev=40c0103ed5c994e6ca0d85a76f7b22a796c6763e#40c0103ed5c994e6ca0d85a76f7b22a796c6763e"
 dependencies = [
  "memchr",
 ]
 
 [[package]]
 name = "magequery-core"
-version = "0.29.0"
-source = "git+https://github.com/cresset-tools/magequery?rev=cabe1eede86528540f8f646e8702b394f37b6799#cabe1eede86528540f8f646e8702b394f37b6799"
+version = "0.30.0"
+source = "git+https://github.com/cresset-tools/magequery?rev=40c0103ed5c994e6ca0d85a76f7b22a796c6763e#40c0103ed5c994e6ca0d85a76f7b22a796c6763e"
 dependencies = [
  "aes",
  "base64 0.22.1",
@@ -1837,6 +1837,7 @@ dependencies = [
  "sha1",
  "simple-rijndael",
  "thiserror 2.0.21",
+ "xxhash-rust",
 ]
 
 [[package]]
@@ -4057,6 +4058,12 @@ dependencies = [
  "libc",
  "rustix",
 ]
+
+[[package]]
+name = "xxhash-rust"
+version = "0.8.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "40de123dbb523ebcc00d61ec01840ad192578afc378d859f3429caa38308fad5"
 
 [[package]]
 name = "yoke"
